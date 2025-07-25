@@ -260,13 +260,13 @@ class GelismisArama:
             except:
                 pass
             
-                         # 1. Alma hamleleri (MVV-LVA) - ama şah hariç
-             hedef_kare = hamle[1]
-             if tahta.bit_kontrol_et(hedef_kare):
-                 hedef_tas = tahta.tas_turu_al(hedef_kare)
-                 kaynak_tas = tahta.tas_turu_al(hamle[0])
-                 if hedef_tas and kaynak_tas and hedef_tas[1] != 'sah':  # Şah alma değilse
-                     puan += self._mvv_lva_skor(kaynak_tas[1], hedef_tas[1])
+            # 1. Alma hamleleri (MVV-LVA) - ama şah hariç
+            hedef_kare = hamle[1]
+            if tahta.bit_kontrol_et(hedef_kare):
+                hedef_tas = tahta.tas_turu_al(hedef_kare)
+                kaynak_tas = tahta.tas_turu_al(hamle[0])
+                if hedef_tas and kaynak_tas and hedef_tas[1] != 'sah':  # Şah alma değilse
+                    puan += self._mvv_lva_skor(kaynak_tas[1], hedef_tas[1])
             
             # 2. Killer moves
             if hamle in self.killer_moves[min(len(self.killer_moves)-1, 10)]:
