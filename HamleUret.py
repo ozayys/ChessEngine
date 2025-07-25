@@ -136,16 +136,34 @@ class HamleUretici:
         if saldirgan_taslar == 0:
             return False
 
+        kare_satir = kare // 8
+        kare_sutun = kare % 8
+
         # Dört doğrusal yön
         for yon in [1, -1, 8, -8]:
             hedef = kare + yon
+            onceki_satir = kare_satir
+            onceki_sutun = kare_sutun
 
             while 0 <= hedef < 64:
-                # Yatay hareket sınır kontrolü
-                if yon in [1, -1]:
-                    if (hedef // 8) != (kare // 8):
+                hedef_satir = hedef // 8
+                hedef_sutun = hedef % 8
+                
+                # Yatay hareket kontrolü
+                if yon == 1:  # Sağa
+                    if hedef_satir != kare_satir or hedef_sutun <= kare_sutun:
+                        break
+                elif yon == -1:  # Sola
+                    if hedef_satir != kare_satir or hedef_sutun >= kare_sutun:
+                        break
+                elif yon == 8:  # Yukarı
+                    if hedef_sutun != kare_sutun or hedef_satir <= kare_satir:
+                        break
+                elif yon == -8:  # Aşağı
+                    if hedef_sutun != kare_sutun or hedef_satir >= kare_satir:
                         break
 
+                # Taş kontrolü
                 if tahta.tum_taslar & (1 << hedef):
                     if saldirgan_taslar & (1 << hedef):
                         return True
@@ -160,21 +178,32 @@ class HamleUretici:
         if saldirgan_taslar == 0:
             return False
 
-        # Dört çapraz yön
-        for yon in [7, 9, -7, -9]:
-            hedef = kare + yon
+        kare_satir = kare // 8
+        kare_sutun = kare % 8
 
-            while 0 <= hedef < 64:
-                # Çapraz sınır kontrolü
-                if abs((hedef % 8) - (kare % 8)) != abs((hedef // 8) - (kare // 8)):
-                    break
+        # Dört çapraz yön: sağ-yukarı(9), sol-yukarı(7), sağ-aşağı(-7), sol-aşağı(-9)
+        yonler = [
+            (1, 1, 9),    # sağ-yukarı
+            (-1, 1, 7),   # sol-yukarı
+            (1, -1, -7),  # sağ-aşağı
+            (-1, -1, -9)  # sol-aşağı
+        ]
+        
+        for sutun_yon, satir_yon, adim in yonler:
+            hedef = kare + adim
+            hedef_satir = kare_satir + satir_yon
+            hedef_sutun = kare_sutun + sutun_yon
 
+            while 0 <= hedef_satir < 8 and 0 <= hedef_sutun < 8:
+                # Taş kontrolü
                 if tahta.tum_taslar & (1 << hedef):
                     if saldirgan_taslar & (1 << hedef):
                         return True
                     break
 
-                hedef += yon
+                hedef += adim
+                hedef_satir += satir_yon
+                hedef_sutun += sutun_yon
 
         return False
 

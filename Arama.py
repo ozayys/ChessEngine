@@ -1,13 +1,54 @@
 """
 MiniMax ve Alpha-Beta Pruning algoritmaları.
 Derinlik bazlı arama.
-Gelecekte iterative deepening ve zaman kontrolü eklenecek.
+Transposition table, killer moves ve hamle sıralama optimizasyonları.
 """
 
 from HamleUret import HamleUretici
 from Degerlendirme import Degerlendirici
 from LegalHamle import LegalHamleBulucu
 import copy
+import time
+
+
+class TranspositionTable:
+    """Zobrist hash tabanlı transposition table"""
+    def __init__(self, boyut_mb=32):
+        # MB cinsinden boyutu entry sayısına çevir (her entry ~24 byte)
+        self.boyut = (boyut_mb * 1024 * 1024) // 24
+        self.tablo = {}
+        self.hit = 0
+        self.miss = 0
+        
+    def kaydet(self, hash_deger, derinlik, skor, bayrak, en_iyi_hamle=None):
+        """Pozisyonu transposition table'a kaydet"""
+        # Boyut kontrolü - eski girişleri temizle
+        if len(self.tablo) > self.boyut:
+            # En eski %25'ini sil
+            silinecek = list(self.tablo.keys())[:len(self.tablo)//4]
+            for key in silinecek:
+                del self.tablo[key]
+                
+        self.tablo[hash_deger] = {
+            'derinlik': derinlik,
+            'skor': skor,
+            'bayrak': bayrak,  # EXACT, LOWER, UPPER
+            'en_iyi_hamle': en_iyi_hamle
+        }
+        
+    def ara(self, hash_deger):
+        """Pozisyonu transposition table'da ara"""
+        if hash_deger in self.tablo:
+            self.hit += 1
+            return self.tablo[hash_deger]
+        self.miss += 1
+        return None
+        
+    def temizle(self):
+        """Transposition table'ı temizle"""
+        self.tablo.clear()
+        self.hit = 0
+        self.miss = 0
 
 
 class Arama:
@@ -18,15 +59,28 @@ class Arama:
         self.legal_bulucu = LegalHamleBulucu()
         self.dugum_sayisi = 0
         self.max_derinlik = 0
+        
+        # Optimizasyon yapıları
+        self.transposition_table = TranspositionTable()
+        self.killer_moves = {}  # Derinlik -> [hamle1, hamle2]
+        self.history_table = {}  # (from, to) -> skor
+        
+        # Zaman yönetimi
+        self.baslangic_zamani = 0
+        self.zaman_limiti = 0
+        self.zaman_asimi = False
 
     def derinlik_degistir(self, yeni_derinlik):
         """Arama derinliğini değiştir"""
         self.derinlik = yeni_derinlik
 
-    def en_iyi_hamle_bul(self, tahta):
+    def en_iyi_hamle_bul(self, tahta, zaman_limiti=None):
         """Alpha-Beta pruning ile en iyi hamleyi bul"""
         self.dugum_sayisi = 0
         self.max_derinlik = 0
+        self.baslangic_zamani = time.time()
+        self.zaman_limiti = zaman_limiti if zaman_limiti else float('inf')
+        self.zaman_asimi = False
 
         en_iyi_hamle = None
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
@@ -39,106 +93,293 @@ class Arama:
             if not hamleler:
                 return None
 
-            # Hamleleri sırala (basit sıralama - alma hamleleri önce)
-            hamleler = self._hamleleri_sirala(tahta, hamleler)
+            # Hamleleri sırala
+            hamleler = self._hamleleri_sirala(tahta, hamleler, None)
 
-            for i, hamle in enumerate(hamleler):
-                try:
-                    # Hamleyi yap
-                    tahta_kopyasi = tahta.kopyala()  # deepcopy yerine kendi kopyala metodunu kullan
+            # İteratif derinleştirme
+            for arama_derinligi in range(1, self.derinlik + 1):
+                if self.zaman_asimi:
+                    break
+                    
+                temp_en_iyi_hamle = None
+                temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+                
+                for i, hamle in enumerate(hamleler):
+                    if self._zaman_kontrolu():
+                        self.zaman_asimi = True
+                        break
+                        
+                    try:
+                        # Hamleyi yap
+                        tahta_kopyasi = tahta.kopyala()
 
-                    if not tahta_kopyasi.hamle_yap(hamle):
-                        continue  # Geçersiz hamle, atla
+                        if not tahta_kopyasi.hamle_yap(hamle):
+                            continue
 
-                    if tahta.beyaz_sira:  # Beyaz oynuyor (maksimize)
-                        skor = self.alpha_beta(tahta_kopyasi, self.derinlik - 1, float('-inf'), float('inf'), False)
-                        if skor > en_iyi_skor:
-                            en_iyi_skor = skor
-                            en_iyi_hamle = hamle
-                    else:  # Siyah oynuyor (minimize)
-                        skor = self.alpha_beta(tahta_kopyasi, self.derinlik - 1, float('-inf'), float('inf'), True)
-                        if skor < en_iyi_skor:
-                            en_iyi_skor = skor
-                            en_iyi_hamle = hamle
+                        if tahta.beyaz_sira:  # Beyaz oynuyor (maksimize)
+                            skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                  float('-inf'), float('inf'), False)
+                            if skor > temp_en_iyi_skor:
+                                temp_en_iyi_skor = skor
+                                temp_en_iyi_hamle = hamle
+                        else:  # Siyah oynuyor (minimize)
+                            skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                  float('-inf'), float('inf'), True)
+                            if skor < temp_en_iyi_skor:
+                                temp_en_iyi_skor = skor
+                                temp_en_iyi_hamle = hamle
 
-                except Exception as e:
-                    continue
+                    except Exception as e:
+                        print(f"Hamle değerlendirme hatası: {e}")
+                        continue
+                
+                # Bu derinlikte tamamlandıysa en iyi hamleyi güncelle
+                if not self.zaman_asimi and temp_en_iyi_hamle:
+                    en_iyi_hamle = temp_en_iyi_hamle
+                    en_iyi_skor = temp_en_iyi_skor
+                    
+                    # Hamleleri en iyi hamle başta olacak şekilde yeniden sırala
+                    if en_iyi_hamle in hamleler:
+                        hamleler.remove(en_iyi_hamle)
+                        hamleler.insert(0, en_iyi_hamle)
 
         except Exception as e:
             print(f"Arama genel hatası: {e}")
 
         return en_iyi_hamle
 
-    def _hamleleri_sirala(self, tahta, hamleler):
-        """Hamleleri sırala (alma hamleleri önce)"""
-        alma_hamleler = []
-        normal_hamleler = []
+    def _zaman_kontrolu(self):
+        """Zaman aşımı kontrolü"""
+        if self.zaman_limiti == float('inf'):
+            return False
+        return time.time() - self.baslangic_zamani > self.zaman_limiti
 
+    def _hamleleri_sirala(self, tahta, hamleler, tt_hamle):
+        """Hamleleri sırala - daha iyi sıralama için gelişmiş algoritma"""
+        skorlu_hamleler = []
+        
         for hamle in hamleler:
-            hedef_kare = hamle[1]
-            if tahta.bit_kontrol_et(hedef_kare):  # Hedef karede taş var
-                alma_hamleler.append(hamle)
-            else:
-                normal_hamleler.append(hamle)
+            skor = 0
+            
+            # Transposition table hamlesi en yüksek öncelik
+            if tt_hamle and hamle == tt_hamle:
+                skor += 10000
+            
+            # Killer moves
+            derinlik_key = self.derinlik - tahta.yarim_hamle_sayici
+            if derinlik_key in self.killer_moves:
+                if hamle in self.killer_moves[derinlik_key]:
+                    skor += 5000
+            
+            # Alma hamlesi kontrolü
+            hedef_tas = tahta.tas_turu_al(hamle[1])
+            if hedef_tas:
+                # MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
+                kaynak_tas = tahta.tas_turu_al(hamle[0])
+                if kaynak_tas:
+                    victim_value = self._tas_degeri(hedef_tas[1])
+                    attacker_value = self._tas_degeri(kaynak_tas[1])
+                    skor += 1000 + (victim_value * 10) - attacker_value
+            
+            # History heuristic
+            history_key = (hamle[0], hamle[1])
+            if history_key in self.history_table:
+                skor += self.history_table[history_key]
+            
+            # Merkeze doğru hamleler
+            hedef_satir, hedef_sutun = divmod(hamle[1], 8)
+            merkez_uzaklik = abs(hedef_satir - 3.5) + abs(hedef_sutun - 3.5)
+            skor += (7 - merkez_uzaklik) * 10
+            
+            skorlu_hamleler.append((skor, hamle))
+        
+        # Skorlara göre sırala (büyükten küçüğe)
+        skorlu_hamleler.sort(key=lambda x: x[0], reverse=True)
+        
+        return [hamle for skor, hamle in skorlu_hamleler]
 
-        return alma_hamleler + normal_hamleler
+    def _tas_degeri(self, tas_turu):
+        """Taş değerlerini döndür"""
+        degerler = {
+            'piyon': 100,
+            'at': 320,
+            'fil': 330,
+            'kale': 500,
+            'vezir': 900,
+            'sah': 20000
+        }
+        return degerler.get(tas_turu, 0)
 
     def alpha_beta(self, tahta, derinlik, alpha, beta, maksimize_ediyor):
-        """Alpha-Beta pruning algoritması"""
+        """Alpha-Beta pruning algoritması - optimizasyonlarla"""
         self.dugum_sayisi += 1
         self.max_derinlik = max(self.max_derinlik, self.derinlik - derinlik)
+        
+        # Zaman kontrolü
+        if self._zaman_kontrolu():
+            self.zaman_asimi = True
+            return self.degerlendirme.degerlendir(tahta)
+
+        # Transposition table kontrolü
+        tt_entry = self.transposition_table.ara(tahta.zobrist_hash()) if hasattr(tahta, 'zobrist_hash') else None
+        tt_hamle = None
+        
+        if tt_entry and tt_entry['derinlik'] >= derinlik:
+            if tt_entry['bayrak'] == 'EXACT':
+                return tt_entry['skor']
+            elif tt_entry['bayrak'] == 'LOWER':
+                alpha = max(alpha, tt_entry['skor'])
+            elif tt_entry['bayrak'] == 'UPPER':
+                beta = min(beta, tt_entry['skor'])
+            
+            if alpha >= beta:
+                return tt_entry['skor']
+        
+        if tt_entry:
+            tt_hamle = tt_entry.get('en_iyi_hamle')
 
         # Oyun sonu kontrolü
         if tahta.mat_mi():
-            # Mat durumu - mevcut oyuncu için kötü
-            if maksimize_ediyor:
-                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
-            else:
-                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            skor = -self.degerlendirme.mat_skoru(self.derinlik - derinlik) if maksimize_ediyor else self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            return skor
         
         if tahta.pat_mi():
-            # Pat durumu - beraberlik
             return 0
 
-        # Terminal düğüm kontrolü
-        if derinlik == 0:
-            return self.degerlendirme.degerlendir(tahta)
+        # Quiescence search için derinlik kontrolü
+        if derinlik <= 0:
+            return self.quiescence_search(tahta, alpha, beta, maksimize_ediyor)
 
-        # Legal hamleleri al
+        # Legal hamleleri al ve sırala
         hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
-
-        # Hamle yoksa (bu noktada mat/pat kontrolü yapıldı)
+        
         if not hamleler:
             return self.degerlendirme.degerlendir(tahta)
+            
+        hamleler = self._hamleleri_sirala(tahta, hamleler, tt_hamle)
+
+        en_iyi_hamle = None
+        hash_bayrak = 'UPPER'
 
         if maksimize_ediyor:
             max_eval = float('-inf')
+            
             for hamle in hamleler:
-                tahta_kopyasi = copy.deepcopy(tahta)
+                tahta_kopyasi = tahta.kopyala()
                 tahta_kopyasi.hamle_yap(hamle)
 
                 eval_skor = self.alpha_beta(tahta_kopyasi, derinlik - 1, alpha, beta, False)
-                max_eval = max(max_eval, eval_skor)
+                
+                if eval_skor > max_eval:
+                    max_eval = eval_skor
+                    en_iyi_hamle = hamle
+                    
                 alpha = max(alpha, eval_skor)
 
                 if beta <= alpha:
-                    break  # Beta cutoff
+                    # Beta cutoff - killer move olarak kaydet
+                    self._killer_move_ekle(derinlik, hamle)
+                    self._history_guncelle(hamle, derinlik)
+                    hash_bayrak = 'LOWER'
+                    break
 
+            if hasattr(tahta, 'zobrist_hash'):
+                self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, max_eval, hash_bayrak, en_iyi_hamle)
+            
             return max_eval
+            
         else:
             min_eval = float('inf')
+            
             for hamle in hamleler:
-                tahta_kopyasi = copy.deepcopy(tahta)
+                tahta_kopyasi = tahta.kopyala()
                 tahta_kopyasi.hamle_yap(hamle)
 
                 eval_skor = self.alpha_beta(tahta_kopyasi, derinlik - 1, alpha, beta, True)
-                min_eval = min(min_eval, eval_skor)
+                
+                if eval_skor < min_eval:
+                    min_eval = eval_skor
+                    en_iyi_hamle = hamle
+                    
                 beta = min(beta, eval_skor)
 
                 if beta <= alpha:
-                    break  # Alpha cutoff
+                    # Alpha cutoff - killer move olarak kaydet
+                    self._killer_move_ekle(derinlik, hamle)
+                    self._history_guncelle(hamle, derinlik)
+                    hash_bayrak = 'LOWER'
+                    break
 
+            if hasattr(tahta, 'zobrist_hash'):
+                self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, min_eval, hash_bayrak, en_iyi_hamle)
+            
             return min_eval
+
+    def quiescence_search(self, tahta, alpha, beta, maksimize_ediyor):
+        """Quiescence search - sadece alma hamlelerini değerlendir"""
+        stand_pat = self.degerlendirme.degerlendir(tahta)
+        
+        if maksimize_ediyor:
+            if stand_pat >= beta:
+                return beta
+            alpha = max(alpha, stand_pat)
+        else:
+            if stand_pat <= alpha:
+                return alpha
+            beta = min(beta, stand_pat)
+        
+        # Sadece alma hamlelerini al
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
+        alma_hamleleri = [h for h in hamleler if tahta.tas_turu_al(h[1])]
+        
+        if not alma_hamleleri:
+            return stand_pat
+            
+        # Alma hamlelerini değerlendir
+        for hamle in alma_hamleleri:
+            tahta_kopyasi = tahta.kopyala()
+            tahta_kopyasi.hamle_yap(hamle)
+            
+            skor = self.quiescence_search(tahta_kopyasi, alpha, beta, not maksimize_ediyor)
+            
+            if maksimize_ediyor:
+                alpha = max(alpha, skor)
+                if alpha >= beta:
+                    return beta
+            else:
+                beta = min(beta, skor)
+                if beta <= alpha:
+                    return alpha
+                    
+        return alpha if maksimize_ediyor else beta
+
+    def _killer_move_ekle(self, derinlik, hamle):
+        """Killer move ekle"""
+        if derinlik not in self.killer_moves:
+            self.killer_moves[derinlik] = []
+        
+        # Aynı hamle yoksa ekle
+        if hamle not in self.killer_moves[derinlik]:
+            self.killer_moves[derinlik].append(hamle)
+            # En fazla 2 killer move tut
+            if len(self.killer_moves[derinlik]) > 2:
+                self.killer_moves[derinlik].pop(0)
+
+    def _history_guncelle(self, hamle, derinlik):
+        """History table güncelle"""
+        key = (hamle[0], hamle[1])
+        bonus = derinlik * derinlik
+        
+        if key not in self.history_table:
+            self.history_table[key] = 0
+        
+        self.history_table[key] += bonus
+        
+        # Overflow kontrolü
+        if self.history_table[key] > 10000:
+            # Tüm değerleri yarıya indir
+            for k in self.history_table:
+                self.history_table[k] //= 2
 
     def minimax(self, tahta, derinlik, maksimize_ediyor):
         """Basit MiniMax algoritması (Alpha-Beta olmadan)"""

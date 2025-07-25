@@ -223,11 +223,146 @@ class LegalHamleBulucu:
         return self.hamle_uretici.saldiri_altinda_mi(tahta, sah_pozisyonu, not beyaz)
 
     def mat_mi(self, tahta):
-        """Mat durumu kontrolü"""
-        legal_hamleler = self.legal_hamleleri_bul(tahta)
+        """Mat durumu kontrolü - detaylı analiz ile"""
+        # Önce şah tehdidinde mi kontrol et
         sah_tehdidinde = self.sah_tehdidinde_mi(tahta, tahta.beyaz_sira)
+        if not sah_tehdidinde:
+            return False
+        
+        # Legal hamleleri bul
+        legal_hamleler = self.legal_hamleleri_bul(tahta)
+        
+        # Legal hamle varsa mat değil
+        if len(legal_hamleler) > 0:
+            return False
+            
+        # Legal hamle yoksa ve şah tehdidindeyse mat
+        return True
 
-        return len(legal_hamleler) == 0 and sah_tehdidinde
+    def sah_ceken_taslar(self, tahta, beyaz):
+        """Şah çeken taşları bul"""
+        sah_cekenler = []
+        
+        # Şahın pozisyonunu bul
+        sah_bitboard = tahta.beyaz_sah if beyaz else tahta.siyah_sah
+        if sah_bitboard == 0:
+            return sah_cekenler
+            
+        sah_pozisyonu = tahta.en_dusuk_bit_al(sah_bitboard)
+        
+        # Karşı tarafın taşlarını kontrol et
+        dusman_renk = 'siyah' if beyaz else 'beyaz'
+        
+        # Tüm düşman taşlarını kontrol et
+        for kare in range(64):
+            tas_bilgisi = tahta.tas_turu_al(kare)
+            if tas_bilgisi and tas_bilgisi[0] == dusman_renk:
+                # Bu taş şaha saldırıyor mu kontrol et
+                if self._tas_saha_saldiriyor_mu(tahta, kare, sah_pozisyonu, tas_bilgisi[1], beyaz):
+                    sah_cekenler.append(kare)
+                    
+        return sah_cekenler
+    
+    def _tas_saha_saldiriyor_mu(self, tahta, tas_kare, sah_kare, tas_turu, sah_beyaz):
+        """Belirtilen taş şaha saldırıyor mu kontrol et"""
+        if tas_turu == 'piyon':
+            # Piyon saldırı kontrolü
+            if sah_beyaz:
+                # Siyah piyon beyaz şaha saldırıyor mu
+                if tas_kare - 7 == sah_kare and (tas_kare % 8) < 7:
+                    return True
+                if tas_kare - 9 == sah_kare and (tas_kare % 8) > 0:
+                    return True
+            else:
+                # Beyaz piyon siyah şaha saldırıyor mu
+                if tas_kare + 7 == sah_kare and (tas_kare % 8) > 0:
+                    return True
+                if tas_kare + 9 == sah_kare and (tas_kare % 8) < 7:
+                    return True
+                    
+        elif tas_turu == 'at':
+            # At saldırı kontrolü
+            at_hamleleri = [(-2,-1), (-2,1), (-1,-2), (-1,2), (1,-2), (1,2), (2,-1), (2,1)]
+            tas_satir, tas_sutun = divmod(tas_kare, 8)
+            sah_satir, sah_sutun = divmod(sah_kare, 8)
+            
+            for ds, dt in at_hamleleri:
+                if tas_satir + ds == sah_satir and tas_sutun + dt == sah_sutun:
+                    return True
+                    
+        elif tas_turu == 'fil' or tas_turu == 'vezir':
+            # Çapraz saldırı kontrolü
+            if self._capraz_yol_acik_mi(tahta, tas_kare, sah_kare):
+                return True
+                
+        if tas_turu == 'kale' or tas_turu == 'vezir':
+            # Düz saldırı kontrolü
+            if self._duz_yol_acik_mi(tahta, tas_kare, sah_kare):
+                return True
+                
+        elif tas_turu == 'sah':
+            # Şah saldırı kontrolü
+            tas_satir, tas_sutun = divmod(tas_kare, 8)
+            sah_satir, sah_sutun = divmod(sah_kare, 8)
+            
+            if abs(tas_satir - sah_satir) <= 1 and abs(tas_sutun - sah_sutun) <= 1:
+                return True
+                
+        return False
+    
+    def _capraz_yol_acik_mi(self, tahta, kaynak, hedef):
+        """İki kare arasındaki çapraz yol açık mı"""
+        kaynak_satir, kaynak_sutun = divmod(kaynak, 8)
+        hedef_satir, hedef_sutun = divmod(hedef, 8)
+        
+        satir_farki = hedef_satir - kaynak_satir
+        sutun_farki = hedef_sutun - kaynak_sutun
+        
+        # Çapraz değilse False
+        if abs(satir_farki) != abs(sutun_farki) or satir_farki == 0:
+            return False
+            
+        satir_yon = 1 if satir_farki > 0 else -1
+        sutun_yon = 1 if sutun_farki > 0 else -1
+        
+        # Aradaki kareleri kontrol et
+        test_satir = kaynak_satir + satir_yon
+        test_sutun = kaynak_sutun + sutun_yon
+        
+        while test_satir != hedef_satir:
+            test_kare = test_satir * 8 + test_sutun
+            if tahta.bit_kontrol_et(test_kare):
+                return False
+            test_satir += satir_yon
+            test_sutun += sutun_yon
+            
+        return True
+    
+    def _duz_yol_acik_mi(self, tahta, kaynak, hedef):
+        """İki kare arasındaki düz yol açık mı"""
+        kaynak_satir, kaynak_sutun = divmod(kaynak, 8)
+        hedef_satir, hedef_sutun = divmod(hedef, 8)
+        
+        # Aynı satır veya sütunda değilse False
+        if kaynak_satir != hedef_satir and kaynak_sutun != hedef_sutun:
+            return False
+            
+        if kaynak_satir == hedef_satir:
+            # Yatay hareket
+            baslangic = min(kaynak_sutun, hedef_sutun) + 1
+            bitis = max(kaynak_sutun, hedef_sutun)
+            for sutun in range(baslangic, bitis):
+                if tahta.bit_kontrol_et(kaynak_satir * 8 + sutun):
+                    return False
+        else:
+            # Dikey hareket
+            baslangic = min(kaynak_satir, hedef_satir) + 1
+            bitis = max(kaynak_satir, hedef_satir)
+            for satir in range(baslangic, bitis):
+                if tahta.bit_kontrol_et(satir * 8 + kaynak_sutun):
+                    return False
+                    
+        return True
 
     def pat_mi(self, tahta):
         """Pat durumu kontrolü"""

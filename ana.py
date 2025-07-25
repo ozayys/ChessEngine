@@ -9,6 +9,7 @@ import os
 from Tahta import Tahta
 from Arama import Arama
 import threading
+import time
 
 
 class SatrancGUI:
@@ -643,20 +644,41 @@ class SatrancGUI:
 
             if not mevcut_hamleler:
                 print("Motor için hamle bulunamadı!")
+                # Oyun bitti kontrolü
+                if self.tahta.mat_mi():
+                    self.oyun_bitti = True
+                    print("Mat! Beyaz kazandı.")
+                elif self.tahta.pat_mi():
+                    self.oyun_bitti = True
+                    print("Pat! Berabere.")
                 return
 
-            # Arama ile en iyi hamleyi bul
-            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta)
+            # Zaman limiti ile arama yap (3 saniye)
+            baslangic_zamani = time.time()
+            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta, zaman_limiti=3.0)
             
-            if en_iyi_hamle:
+            # Arama süresi
+            gecen_sure = time.time() - baslangic_zamani
+            
+            if en_iyi_hamle and en_iyi_hamle in mevcut_hamleler:
                 # Hamleyi yap
                 if self.tahta.hamle_yap(en_iyi_hamle):
-                    print(f"Motor hamle yaptı: {en_iyi_hamle}")
-                    self.son_hamle = en_iyi_hamle
+                    # Hamle notasyonu oluştur
+                    hamle_str = self._hamle_notasyonu_olustur(en_iyi_hamle)
                     
                     # Arama istatistiklerini güncelle
                     istatistikler = self.arama.get_istatistikler()
                     self.dugum_sayisi = istatistikler['dugum_sayisi']
+                    
+                    print(f"Motor hamle yaptı: {hamle_str}")
+                    print(f"Düşünme süresi: {gecen_sure:.2f}s, Değerlendirilen pozisyon: {self.dugum_sayisi:,}")
+                    
+                    # Transposition table istatistikleri
+                    if hasattr(self.arama.transposition_table, 'hit'):
+                        tt_hit_rate = self.arama.transposition_table.hit / max(1, self.arama.transposition_table.hit + self.arama.transposition_table.miss) * 100
+                        print(f"TT Hit Rate: {tt_hit_rate:.1f}%")
+                    
+                    self.son_hamle = en_iyi_hamle
                     
                     # Pozisyonu değerlendir (beyaz perspektifinden)
                     from Degerlendirme import Degerlendirici
@@ -668,15 +690,18 @@ class SatrancGUI:
                     # Oyun bitti mi kontrol et
                     if self.tahta.oyun_bitti_mi():
                         self.oyun_bitti = True
+                        if self.tahta.mat_mi():
+                            print("Mat! Siyah kazandı.")
+                        elif self.tahta.pat_mi():
+                            print("Pat! Berabere.")
                 else:
                     print("Motor hamle yapamadı!")
             else:
-                # Rastgele hamle yap
-                import random
-                rastgele_hamle = random.choice(mevcut_hamleler)
-                if self.tahta.hamle_yap(rastgele_hamle):
-                    print(f"Motor rastgele hamle yaptı: {rastgele_hamle}")
-                    self.son_hamle = rastgele_hamle
+                # Güvenlik: Legal hamle bulunamadıysa ilk legal hamleyi yap
+                print("Uyarı: Motor legal hamle bulamadı, ilk legal hamle yapılıyor.")
+                ilk_hamle = mevcut_hamleler[0]
+                if self.tahta.hamle_yap(ilk_hamle):
+                    self.son_hamle = ilk_hamle
                     self.son_degerlendirme = 0
                     
                     # Oyun bitti mi kontrol et
@@ -685,9 +710,22 @@ class SatrancGUI:
 
         except Exception as e:
             print(f"Motor hamle hatası: {e}")
+            import traceback
+            traceback.print_exc()
 
         finally:
             self.motor_dusunuyor = False
+    
+    def _hamle_notasyonu_olustur(self, hamle):
+        """Hamle için satranç notasyonu oluştur"""
+        kaynak, hedef = hamle[0], hamle[1]
+        
+        # Kare indekslerini satranç notasyonuna çevir
+        kaynak_str = self.kare_notasyonu(kaynak)
+        hedef_str = self.kare_notasyonu(hedef)
+        
+        # Basit notasyon
+        return f"{kaynak_str}-{hedef_str}"
 
     def yeniden_baslat(self):
         """Oyunu yeniden başlat"""

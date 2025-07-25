@@ -26,11 +26,37 @@ class Degerlendirici:
 
         # Maksimum malzeme skoru (açılış pozisyonu)
         self.max_malzeme_skoru = 78  # 16*0 + 4*1 + 4*1 + 4*2 + 2*4
+        
+        # Değerlendirme cache (basit)
+        self.eval_cache = {}
+        self.cache_hit = 0
+        self.cache_miss = 0
 
     def degerlendir(self, tahta):
         """Arama modülü tarafından çağrılan ana değerlendirme fonksiyonu"""
+        # Cache kontrolü
+        if hasattr(tahta, 'zobrist_hash'):
+            hash_val = tahta.zobrist_hash()
+            if hash_val in self.eval_cache:
+                self.cache_hit += 1
+                cached_skor = self.eval_cache[hash_val]
+                return cached_skor if tahta.beyaz_sira else -cached_skor
+            self.cache_miss += 1
+        
         # Arama algoritması için: mevcut sıradaki oyuncunun perspektifinden
         skor = self.pozisyon_degerlendir(tahta)
+        
+        # Cache'e kaydet
+        if hasattr(tahta, 'zobrist_hash'):
+            # Cache boyutu kontrolü
+            if len(self.eval_cache) > 100000:
+                # En eski %25'ini sil
+                silinecek = list(self.eval_cache.keys())[:len(self.eval_cache)//4]
+                for key in silinecek:
+                    del self.eval_cache[key]
+            
+            self.eval_cache[hash_val] = skor
+        
         return skor if tahta.beyaz_sira else -skor
 
     def _pst_tablolarini_olustur(self):
@@ -131,36 +157,80 @@ class Degerlendirici:
         }
 
     def pozisyon_degerlendir(self, tahta):
-        """Ana değerlendirme fonksiyonu"""
+        """Ana değerlendirme fonksiyonu - optimize edilmiş"""
         skor = 0
 
+        # Hızlı malzeme kontrolü
+        beyaz_malzeme = self._hizli_malzeme_hesapla(tahta, True)
+        siyah_malzeme = self._hizli_malzeme_hesapla(tahta, False)
+        
+        # Eğer büyük malzeme farkı varsa detaylı değerlendirmeye gerek yok
+        malzeme_farki = beyaz_malzeme - siyah_malzeme
+        if abs(malzeme_farki) > 1000:  # 10 piyon değerinden fazla fark
+            return malzeme_farki
+        
         # Malzeme ve pozisyonel değerlendirme
         skor += self.malzeme_dengesi_hesapla(tahta)
         skor += self.pozisyonel_deger_hesapla(tahta)
 
-        # Mobilite değerlendirmesi
+        # Oyun fazını belirle
+        faz = self._oyun_fazi_belirle(tahta)
+        
+        # Mobilite değerlendirmesi - sadece orta oyunda önemli
+        if faz < 0.7:  # Son oyun değilse
+            try:
+                skor += self.mobilite_hesapla(tahta) * (1 - faz)
+            except:
+                pass
+
+        # Şah güvenliği - sadece açılış ve orta oyunda önemli
+        if faz < 0.5:
+            try:
+                skor += self.sah_guvenlik_hesapla(tahta) * (1 - faz * 2)
+            except:
+                pass
+
+        # Piyon yapısı değerlendirmesi
         try:
-            skor += self.mobilite_hesapla(tahta)
+            skor += self.piyon_yapisi_degerlendir(tahta)
         except:
-            # Mobilite hesaplaması başarısız olursa pas geç
             pass
 
-        # Şah güvenliği
-        try:
-            skor += self.sah_guvenlik_hesapla(tahta)
-        except:
-            # Şah güvenliği hesaplaması başarısız olursa pas geç
-            pass
-
-        # Piyon yapısı
-        try:
-            skor += self.piyon_yapisi_hesapla(tahta)
-        except:
-            # Piyon yapısı hesaplaması başarısız olursa pas geç
-            pass
-
-        # Her zaman beyaz perspektifinden döndür (pozitif = beyaz iyi, negatif = siyah iyi)
         return skor
+    
+    def _hizli_malzeme_hesapla(self, tahta, beyaz):
+        """Hızlı malzeme hesaplama"""
+        toplam = 0
+        
+        if beyaz:
+            toplam += tahta.bit_sayisi(tahta.beyaz_piyon) * 100
+            toplam += tahta.bit_sayisi(tahta.beyaz_at) * 320
+            toplam += tahta.bit_sayisi(tahta.beyaz_fil) * 330
+            toplam += tahta.bit_sayisi(tahta.beyaz_kale) * 500
+            toplam += tahta.bit_sayisi(tahta.beyaz_vezir) * 900
+        else:
+            toplam += tahta.bit_sayisi(tahta.siyah_piyon) * 100
+            toplam += tahta.bit_sayisi(tahta.siyah_at) * 320
+            toplam += tahta.bit_sayisi(tahta.siyah_fil) * 330
+            toplam += tahta.bit_sayisi(tahta.siyah_kale) * 500
+            toplam += tahta.bit_sayisi(tahta.siyah_vezir) * 900
+            
+        return toplam
+    
+    def _oyun_fazi_belirle(self, tahta):
+        """Oyun fazını belirle (0=açılış, 1=son oyun)"""
+        # Hızlı malzeme sayımı
+        toplam_malzeme = 0
+        
+        # At, fil, kale, vezir sayıları
+        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_at | tahta.siyah_at) * 1
+        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_fil | tahta.siyah_fil) * 1
+        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_kale | tahta.siyah_kale) * 2
+        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir | tahta.siyah_vezir) * 4
+        
+        # Faz hesaplama (0-1 arası)
+        faz = 1.0 - (toplam_malzeme / self.max_malzeme_skoru)
+        return max(0.0, min(1.0, faz))
 
     def malzeme_dengesi_hesapla(self, tahta):
         """Malzeme dengesini hesapla"""

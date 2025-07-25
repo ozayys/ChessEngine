@@ -3,9 +3,49 @@ Bitboard tabanlı satranç tahtası implementasyonu.
 64-bit integer ile her taş türü ve rengi için ayrı bitboard.
 """
 
+import random
 
 class Tahta:
+    # Zobrist hash için random sayılar (sınıf değişkenleri)
+    _zobrist_pieces = {}
+    _zobrist_castling = {}
+    _zobrist_en_passant = {}
+    _zobrist_side = 0
+    _zobrist_initialized = False
+    
+    @classmethod
+    def _init_zobrist(cls):
+        """Zobrist hash için random sayıları başlat"""
+        if cls._zobrist_initialized:
+            return
+            
+        random.seed(42)  # Tutarlılık için sabit seed
+        
+        # Her kare ve taş kombinasyonu için random sayı
+        for kare in range(64):
+            for renk in ['beyaz', 'siyah']:
+                for tas in ['piyon', 'at', 'fil', 'kale', 'vezir', 'sah']:
+                    cls._zobrist_pieces[(kare, renk, tas)] = random.getrandbits(64)
+        
+        # Rok hakları için
+        cls._zobrist_castling['beyaz_kisa'] = random.getrandbits(64)
+        cls._zobrist_castling['beyaz_uzun'] = random.getrandbits(64)
+        cls._zobrist_castling['siyah_kisa'] = random.getrandbits(64)
+        cls._zobrist_castling['siyah_uzun'] = random.getrandbits(64)
+        
+        # En passant sütunları için
+        for sutun in range(8):
+            cls._zobrist_en_passant[sutun] = random.getrandbits(64)
+        
+        # Sıra için
+        cls._zobrist_side = random.getrandbits(64)
+        
+        cls._zobrist_initialized = True
+
     def __init__(self):
+        # Zobrist başlatma
+        self._init_zobrist()
+        
         # Bitboard tanımları - her taş türü için ayrı 64-bit integer
         self.beyaz_piyon = 0x000000000000FF00
         self.beyaz_kale = 0x0000000000000081
@@ -33,6 +73,9 @@ class Tahta:
 
         # Precalculated masks ve tablolar
         self._maskeleri_hazirla()
+        
+        # Zobrist hash değeri
+        self._hash = self._hesapla_zobrist_hash()
 
     def _maskeleri_hazirla(self):
         """Sık kullanılan bit maskelerini önceden hesapla"""
@@ -100,6 +143,9 @@ class Tahta:
     def tas_ekle(self, kare, renk, tur):
         """Belirtilen kareye taş ekle"""
         mask = self.kare_maskeleri[kare]
+        
+        # Zobrist güncelle
+        self._zobrist_guncelle_tas_ekle(kare, renk, tur)
 
         if renk == 'beyaz':
             if tur == 'piyon':
@@ -130,6 +176,12 @@ class Tahta:
 
     def tas_kaldir(self, kare):
         """Belirtilen kareden taşı kaldır"""
+        # Önce taş bilgisini al (Zobrist için)
+        tas_bilgisi = self.tas_turu_al(kare)
+        if tas_bilgisi:
+            renk, tur = tas_bilgisi
+            self._zobrist_guncelle_tas_kaldir(kare, renk, tur)
+        
         mask = ~self.kare_maskeleri[kare]
 
         self.beyaz_piyon &= mask
@@ -236,6 +288,9 @@ class Tahta:
             if not self.beyaz_sira:  # Siyah oynadıysa
                 self.hamle_sayisi += 1
 
+            # Sıra değişimini Zobrist'e yansıt
+            self._hash ^= self._zobrist_side
+
             return True
 
         except Exception as e:
@@ -277,22 +332,25 @@ class Tahta:
             self.siyah_kisa_rok = False
 
     def kopyala(self):
-        """Tahtanın derin kopyasını oluştur"""
-        yeni_tahta = Tahta()
+        """Tahta objesinin hızlı kopyasını oluştur"""
+        yeni_tahta = Tahta.__new__(Tahta)
+        
+        # Bitboard'ları kopyala
         yeni_tahta.beyaz_piyon = self.beyaz_piyon
         yeni_tahta.beyaz_kale = self.beyaz_kale
         yeni_tahta.beyaz_at = self.beyaz_at
         yeni_tahta.beyaz_fil = self.beyaz_fil
         yeni_tahta.beyaz_vezir = self.beyaz_vezir
         yeni_tahta.beyaz_sah = self.beyaz_sah
-
+        
         yeni_tahta.siyah_piyon = self.siyah_piyon
         yeni_tahta.siyah_kale = self.siyah_kale
         yeni_tahta.siyah_at = self.siyah_at
         yeni_tahta.siyah_fil = self.siyah_fil
         yeni_tahta.siyah_vezir = self.siyah_vezir
         yeni_tahta.siyah_sah = self.siyah_sah
-
+        
+        # Oyun durumunu kopyala
         yeni_tahta.beyaz_sira = self.beyaz_sira
         yeni_tahta.beyaz_kisa_rok = self.beyaz_kisa_rok
         yeni_tahta.beyaz_uzun_rok = self.beyaz_uzun_rok
@@ -301,8 +359,62 @@ class Tahta:
         yeni_tahta.en_passant_kare = self.en_passant_kare
         yeni_tahta.yarim_hamle_sayici = self.yarim_hamle_sayici
         yeni_tahta.hamle_sayisi = self.hamle_sayisi
-
+        
+        # Maskeleri kopyala (referans kopyalama yeterli)
+        yeni_tahta.satir_maskeleri = self.satir_maskeleri
+        yeni_tahta.sutun_maskeleri = self.sutun_maskeleri
+        yeni_tahta.ana_kosegen = self.ana_kosegen
+        yeni_tahta.yan_kosegen = self.yan_kosegen
+        yeni_tahta.kare_maskeleri = self.kare_maskeleri
+        
+        # Zobrist hash
+        yeni_tahta._hash = self._hash
+        
         return yeni_tahta
+
+    def zobrist_hash(self):
+        """Mevcut pozisyonun Zobrist hash değerini döndür"""
+        return self._hash
+    
+    def _hesapla_zobrist_hash(self):
+        """Zobrist hash değerini sıfırdan hesapla"""
+        h = 0
+        
+        # Taşlar
+        for kare in range(64):
+            tas_bilgisi = self.tas_turu_al(kare)
+            if tas_bilgisi:
+                renk, tas = tas_bilgisi
+                h ^= self._zobrist_pieces[(kare, renk, tas)]
+        
+        # Rok hakları
+        if self.beyaz_kisa_rok:
+            h ^= self._zobrist_castling['beyaz_kisa']
+        if self.beyaz_uzun_rok:
+            h ^= self._zobrist_castling['beyaz_uzun']
+        if self.siyah_kisa_rok:
+            h ^= self._zobrist_castling['siyah_kisa']
+        if self.siyah_uzun_rok:
+            h ^= self._zobrist_castling['siyah_uzun']
+        
+        # En passant
+        if self.en_passant_kare != -1:
+            sutun = self.en_passant_kare % 8
+            h ^= self._zobrist_en_passant[sutun]
+        
+        # Sıra
+        if self.beyaz_sira:
+            h ^= self._zobrist_side
+        
+        return h
+    
+    def _zobrist_guncelle_tas_ekle(self, kare, renk, tas):
+        """Taş eklendiğinde Zobrist hash'i güncelle"""
+        self._hash ^= self._zobrist_pieces[(kare, renk, tas)]
+    
+    def _zobrist_guncelle_tas_kaldir(self, kare, renk, tas):
+        """Taş kaldırıldığında Zobrist hash'i güncelle"""
+        self._hash ^= self._zobrist_pieces[(kare, renk, tas)]
 
     def bit_sayisi(self, bitboard):
         """Bitboard'daki set bit sayısını döndür (popcount)"""
