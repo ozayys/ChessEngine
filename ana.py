@@ -53,14 +53,14 @@ class SatrancGUI:
         """Taş resimlerini yükle ve boyutlandır"""
         tas_dosyalari = {
             ('beyaz', 'sah'): 'beyazSah.png',
-            ('beyaz', 'vezir'): 'beyazVezir.png',
+            ('beyaz', 'vezir'): 'beyazVezir.png', 
             ('beyaz', 'kale'): 'beyazKale.png',
             ('beyaz', 'fil'): 'beyazFil.png',
             ('beyaz', 'at'): 'beyazAt.png',
             ('beyaz', 'piyon'): 'beyazPiyon.png',
             ('siyah', 'sah'): 'siyahSah.png',
             ('siyah', 'vezir'): 'siyahVezir.png',
-            ('siyah', 'kale'): 'siyahKale.png',
+            ('siyah', 'kale'): 'siyahKale.png', 
             ('siyah', 'fil'): 'siyahFil.png',
             ('siyah', 'at'): 'siyahAt.png',
             ('siyah', 'piyon'): 'siyahPiyon.png'
@@ -153,6 +153,32 @@ class SatrancGUI:
                     resim_rect = resim.get_rect()
                     resim_rect.center = (x + self.KARE_BOYUTU // 2, y + self.KARE_BOYUTU // 2)
                     self.ekran.blit(resim, resim_rect)
+                else:
+                    # Resim yoksa Unicode sembol kullan (backup)
+                    self._unicode_tas_ciz(kare, renk, tas_turu)
+
+    def _unicode_tas_ciz(self, kare, renk, tas_turu):
+        """Unicode semboller ile taş çiz (backup)"""
+        tas_sembolleri = {
+            ('beyaz', 'sah'): '♔', ('beyaz', 'vezir'): '♕', ('beyaz', 'kale'): '♖',
+            ('beyaz', 'fil'): '♗', ('beyaz', 'at'): '♘', ('beyaz', 'piyon'): '♙',
+            ('siyah', 'sah'): '♚', ('siyah', 'vezir'): '♛', ('siyah', 'kale'): '♜',
+            ('siyah', 'fil'): '♝', ('siyah', 'at'): '♞', ('siyah', 'piyon'): '♟'
+        }
+        
+        if (renk, tas_turu) in tas_sembolleri:
+            sembol = tas_sembolleri[(renk, tas_turu)]
+            tas_rengi = (255, 255, 255) if renk == 'beyaz' else (0, 0, 0)
+            
+            # Font oluştur (eğer yoksa)
+            if not hasattr(self, 'tas_font'):
+                self.tas_font = pygame.font.Font(None, 60)
+            
+            text = self.tas_font.render(sembol, True, tas_rengi)
+            text_rect = text.get_rect()
+            x, y = self.kare_pozisyonu_al(kare)
+            text_rect.center = (x + self.KARE_BOYUTU // 2, y + self.KARE_BOYUTU // 2)
+            self.ekran.blit(text, text_rect)
 
     def panel_ciz(self):
         """Sağ paneli çiz"""
@@ -201,58 +227,39 @@ class SatrancGUI:
 
     def kare_secimi_isle(self, kare):
         """Kare seçimini işle"""
-        print(f"DEBUG: Kare seçildi: {kare}")
-        print(f"DEBUG: Motor düşünüyor mu: {self.motor_dusunuyor}")
-        print(f"DEBUG: Oyun bitti mi: {self.oyun_bitti}")
-        print(f"DEBUG: Beyaz sıra mı: {self.tahta.beyaz_sira}")
-
         if self.motor_dusunuyor or self.oyun_bitti:
-            print("DEBUG: Motor düşünüyor veya oyun bitti, işlem iptal")
             return
 
         # Sadece beyaz sırasında insan oynayabilir
         if not self.tahta.beyaz_sira:
-            print("DEBUG: Siyah sıra, insan oynayamaz")
             return
 
         # Eğer seçili kare yoksa
         if self.secili_kare is None:
             tas_info = self.tahta.karedeki_tas(kare)
-            print(f"DEBUG: Karedeki taş: {tas_info}")
 
             if tas_info and tas_info[0] == 'beyaz':  # Sadece beyaz taşları seçilebilir
                 self.secili_kare = kare
                 self.mumkun_hamleler = self.kare_icin_hamleler_bul(kare)
-                print(f"DEBUG: Seçili kare: {kare}, Mümkün hamleler: {len(self.mumkun_hamleler)}")
-
-                # Hamleleri detaylı yazdır
-                for i, hamle in enumerate(self.mumkun_hamleler):
-                    print(f"DEBUG: Hamle {i}: {hamle}")
-            else:
-                print("DEBUG: Beyaz taş değil veya boş kare")
         else:
-            print(f"DEBUG: Zaten seçili kare var: {self.secili_kare}, hedef: {kare}")
-
             # Hamle yapmaya çalış
             hamle_yapildi = self.hamle_dene(self.secili_kare, kare)
-            print(f"DEBUG: Hamle yapıldı mı: {hamle_yapildi}")
 
             if hamle_yapildi:
                 self.secili_kare = None
                 self.mumkun_hamleler = []
-                # Motor sırası başlat
-                pygame.time.set_timer(pygame.USEREVENT + 1, 500)  # 500ms sonra motor hamlesini başlat
+                # Motor sırası başlat - sadece siyah sırasıysa
+                if not self.tahta.beyaz_sira:
+                    pygame.time.set_timer(pygame.USEREVENT + 1, 500)  # 500ms sonra motor hamlesini başlat
             else:
                 # Yeni kare seç
                 tas_info = self.tahta.karedeki_tas(kare)
                 if tas_info and tas_info[0] == 'beyaz':
                     self.secili_kare = kare
                     self.mumkun_hamleler = self.kare_icin_hamleler_bul(kare)
-                    print(f"DEBUG: Yeni kare seçildi: {kare}, Mümkün hamleler: {len(self.mumkun_hamleler)}")
                 else:
                     self.secili_kare = None
                     self.mumkun_hamleler = []
-                    print("DEBUG: Seçim iptal edildi")
 
     def kare_icin_hamleler_bul(self, kaynak_kare):
         """Belirli bir kare için mümkün hamleleri bul"""
@@ -260,40 +267,27 @@ class SatrancGUI:
             from HamleUret import HamleUretici
             uretici = HamleUretici()
             tum_hamleler = uretici.tum_hamleleri_uret(self.tahta)
-            print(f"DEBUG: Toplam hamle sayısı: {len(tum_hamleler)}")
 
             # Sadece bu kareden başlayan hamleleri filtrele
             kare_hamleleri = [hamle for hamle in tum_hamleler if hamle[0] == kaynak_kare]
-            print(f"DEBUG: Kare {kaynak_kare} için hamle sayısı: {len(kare_hamleleri)}")
             return kare_hamleleri
         except Exception as e:
-            print(f"DEBUG: Hamle bulma hatası: {e}")
             return []
 
     def hamle_dene(self, kaynak, hedef):
         """Hamle yapmaya çalış"""
-        print(f"DEBUG: Hamle deneniyor: {kaynak} -> {hedef}")
-        print(f"DEBUG: Mevcut hamleler: {self.mumkun_hamleler}")
-
         for hamle in self.mumkun_hamleler:
             if hamle[0] == kaynak and hamle[1] == hedef:
-                print(f"DEBUG: Hamle bulundu: {hamle}")
                 try:
-                    self.tahta.hamle_yap(hamle)
-                    print("DEBUG: Hamle başarıyla yapıldı")
-                    return True
+                    return self.tahta.hamle_yap(hamle)
                 except Exception as e:
-                    print(f"DEBUG: Hamle yapma hatası: {e}")
                     return False
-
-        print("DEBUG: Geçersiz hamle")
         return False
 
     def motor_hamle_yap(self):
         """Motor hamlesi yapılacak (thread'de)"""
         if not self.tahta.beyaz_sira and not self.oyun_bitti and not self.motor_dusunuyor:
             self.motor_dusunuyor = True
-            print("DEBUG: Motor hamle yapmaya başlıyor...")
             motor_thread = threading.Thread(target=self.motor_hamle_hesapla)
             motor_thread.daemon = True
             motor_thread.start()
@@ -301,42 +295,36 @@ class SatrancGUI:
     def motor_hamle_hesapla(self):
         """Motor hamlesi hesapla (thread fonksiyonu)"""
         try:
-            print("DEBUG: Motor hamle hesaplaması başlıyor...")
-            
             # Önce mevcut hamleleri kontrol et
             from HamleUret import HamleUretici
             uretici = HamleUretici()
             mevcut_hamleler = uretici.tum_hamleleri_uret(self.tahta)
-            print(f"DEBUG: Motor için {len(mevcut_hamleler)} hamle bulundu")
 
             if not mevcut_hamleler:
-                print("DEBUG: Motor için hamle bulunamadı!")
-                self.motor_dusunuyor = False
+                print("Motor için hamle bulunamadı!")
                 return
 
             # Arama ile en iyi hamleyi bul
             en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta)
             
             if en_iyi_hamle:
-                print(f"DEBUG: Motor en iyi hamleyi buldu: {en_iyi_hamle}")
-                self.tahta.hamle_yap(en_iyi_hamle)
-                print(f"DEBUG: Motor hamle yaptı: {en_iyi_hamle}")
+                # Hamleyi yap
+                if self.tahta.hamle_yap(en_iyi_hamle):
+                    print(f"Motor hamle yaptı: {en_iyi_hamle}")
+                else:
+                    print("Motor hamle yapamadı!")
             else:
-                print("DEBUG: Motor arama ile hamle bulamadı, rastgele hamle yapıyor...")
                 # Rastgele hamle yap
                 import random
                 rastgele_hamle = random.choice(mevcut_hamleler)
-                self.tahta.hamle_yap(rastgele_hamle)
-                print(f"DEBUG: Motor rastgele hamle yaptı: {rastgele_hamle}")
+                if self.tahta.hamle_yap(rastgele_hamle):
+                    print(f"Motor rastgele hamle yaptı: {rastgele_hamle}")
 
         except Exception as e:
-            print(f"DEBUG: Motor hamle hatası: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Motor hamle hatası: {e}")
 
         finally:
             self.motor_dusunuyor = False
-            print("DEBUG: Motor hamle tamamlandı")
 
     def yeniden_baslat(self):
         """Oyunu yeniden başlat"""
@@ -374,7 +362,6 @@ class SatrancGUI:
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Sol tık
                         kare = self.kare_koordinati_al(event.pos)
-                        print(f"DEBUG: Mouse tıklandı, pozisyon: {event.pos}, kare: {kare}")
                         if kare is not None:
                             self.kare_secimi_isle(kare)
 
@@ -396,14 +383,10 @@ class SatrancGUI:
 def main():
     """Ana fonksiyon"""
     try:
-        print("DEBUG: Oyun başlatılıyor...")
         oyun = SatrancGUI()
-        print("DEBUG: GUI oluşturuldu, oyun döngüsü başlıyor...")
         oyun.calistir()
     except Exception as e:
         print(f"Oyun hatası: {e}")
-        import traceback
-        traceback.print_exc()
         pygame.quit()
         sys.exit()
 
