@@ -29,7 +29,9 @@ class Degerlendirici:
 
     def degerlendir(self, tahta):
         """Arama modülü tarafından çağrılan ana değerlendirme fonksiyonu"""
-        return self.pozisyon_degerlendir(tahta)
+        # Arama algoritması için: mevcut sıradaki oyuncunun perspektifinden
+        skor = self.pozisyon_degerlendir(tahta)
+        return skor if tahta.beyaz_sira else -skor
 
     def _pst_tablolarini_olustur(self):
         """Piece-Square Table tablolarını oluştur"""
@@ -157,8 +159,8 @@ class Degerlendirici:
             # Piyon yapısı hesaplaması başarısız olursa pas geç
             pass
 
-        # Beyaz perspektifinden döndür
-        return skor if tahta.beyaz_sira else -skor
+        # Her zaman beyaz perspektifinden döndür (pozitif = beyaz iyi, negatif = siyah iyi)
+        return skor
 
     def malzeme_dengesi_hesapla(self, tahta):
         """Malzeme dengesini hesapla"""
