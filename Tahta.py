@@ -148,82 +148,101 @@ class Tahta:
 
     def hamle_yap(self, hamle):
         """Hamleyi tahtaya uygula - tuple formatında"""
-        if len(hamle) < 2:
-            return False
+        try:
+            if not hamle or len(hamle) < 2:
+                print(f"DEBUG: Geçersiz hamle formatı: {hamle}")
+                return False
 
-        kaynak = hamle[0]
-        hedef = hamle[1]
-        ozel_hamle = hamle[3] if len(hamle) > 3 else None
+            kaynak = hamle[0]
+            hedef = hamle[1]
+            ozel_hamle = hamle[3] if len(hamle) > 3 else None
 
-        # Kaynak karedeki taşı al
-        tas_bilgisi = self.tas_turu_al(kaynak)
-        if not tas_bilgisi:
-            return False
+            # Kare sınırları kontrolü
+            if not (0 <= kaynak <= 63) or not (0 <= hedef <= 63):
+                print(f"DEBUG: Geçersiz kare: kaynak={kaynak}, hedef={hedef}")
+                return False
 
-        renk, tur = tas_bilgisi
+            # Kaynak karedeki taşı al
+            tas_bilgisi = self.tas_turu_al(kaynak)
+            if not tas_bilgisi:
+                print(f"DEBUG: Kaynak karede taş yok: {kaynak}")
+                return False
 
-        # Hedef karedeki taşı kaldır (eğer varsa)
-        self.tas_kaldir(hedef)
+            renk, tur = tas_bilgisi
 
-        # Kaynak karedeki taşı kaldır
-        self.tas_kaldir(kaynak)
+            # Doğru renk kontrolü
+            if (renk == 'beyaz') != self.beyaz_sira:
+                print(f"DEBUG: Yanlış renk: {renk}, sıra: {'beyaz' if self.beyaz_sira else 'siyah'}")
+                return False
 
-        # Özel hamle durumları
-        if ozel_hamle == 'kisa_rok':
-            if renk == 'beyaz':
-                self.tas_kaldir(7)  # h1
-                self.tas_ekle(5, 'beyaz', 'kale')  # f1
-                self.tas_ekle(6, 'beyaz', 'sah')  # g1
+            # Hedef karedeki taşı kaldır (eğer varsa)
+            self.tas_kaldir(hedef)
+
+            # Kaynak karedeki taşı kaldır
+            self.tas_kaldir(kaynak)
+
+            # Özel hamle durumları
+            if ozel_hamle == 'kisa_rok':
+                if renk == 'beyaz':
+                    self.tas_kaldir(7)  # h1
+                    self.tas_ekle(5, 'beyaz', 'kale')  # f1
+                    self.tas_ekle(6, 'beyaz', 'sah')  # g1
+                else:
+                    self.tas_kaldir(63)  # h8
+                    self.tas_ekle(61, 'siyah', 'kale')  # f8
+                    self.tas_ekle(62, 'siyah', 'sah')  # g8
+
+            elif ozel_hamle == 'uzun_rok':
+                if renk == 'beyaz':
+                    self.tas_kaldir(0)  # a1
+                    self.tas_ekle(3, 'beyaz', 'kale')  # d1
+                    self.tas_ekle(2, 'beyaz', 'sah')  # c1
+                else:
+                    self.tas_kaldir(56)  # a8
+                    self.tas_ekle(59, 'siyah', 'kale')  # d8
+                    self.tas_ekle(58, 'siyah', 'sah')  # c8
+
+            elif ozel_hamle == 'en_passant':
+                # Alınan piyonu kaldır
+                alinen_piyon_kare = hedef + (-8 if renk == 'beyaz' else 8)
+                self.tas_kaldir(alinen_piyon_kare)
+                self.tas_ekle(hedef, renk, tur)
+
+            elif ozel_hamle in ['terfi', 'terfi_alma']:
+                # Piyon terfisi
+                terfi_tasi = hamle[4] if len(hamle) > 4 else 'vezir'
+                self.tas_ekle(hedef, renk, terfi_tasi)
+
+            elif ozel_hamle == 'iki_kare':
+                # İki kare piyon hamlesi
+                self.en_passant_kare = (kaynak + hedef) // 2
+                self.tas_ekle(hedef, renk, tur)
+
             else:
-                self.tas_kaldir(63)  # h8
-                self.tas_ekle(61, 'siyah', 'kale')  # f8
-                self.tas_ekle(62, 'siyah', 'sah')  # g8
+                # Normal hamle
+                self.tas_ekle(hedef, renk, tur)
 
-        elif ozel_hamle == 'uzun_rok':
-            if renk == 'beyaz':
-                self.tas_kaldir(0)  # a1
-                self.tas_ekle(3, 'beyaz', 'kale')  # d1
-                self.tas_ekle(2, 'beyaz', 'sah')  # c1
-            else:
-                self.tas_kaldir(56)  # a8
-                self.tas_ekle(59, 'siyah', 'kale')  # d8
-                self.tas_ekle(58, 'siyah', 'sah')  # c8
+            # Rok haklarını güncelle
+            self._rok_haklarini_guncelle(kaynak, hedef, renk, tur)
 
-        elif ozel_hamle == 'en_passant':
-            # Alınan piyonu kaldır
-            alinen_piyon_kare = hedef + (-8 if renk == 'beyaz' else 8)
-            self.tas_kaldir(alinen_piyon_kare)
-            self.tas_ekle(hedef, renk, tur)
+            # En passant karesi sıfırla (iki kare piyon hamlesi dışında)
+            if ozel_hamle != 'iki_kare':
+                self.en_passant_kare = -1
 
-        elif ozel_hamle in ['terfi', 'terfi_alma']:
-            # Piyon terfisi
-            terfi_tasi = hamle[4] if len(hamle) > 4 else 'vezir'
-            self.tas_ekle(hedef, renk, terfi_tasi)
+            # Sırayı değiştir
+            self.beyaz_sira = not self.beyaz_sira
 
-        elif ozel_hamle == 'iki_kare':
-            # İki kare piyon hamlesi
-            self.en_passant_kare = (kaynak + hedef) // 2
-            self.tas_ekle(hedef, renk, tur)
+            # Hamle sayısını artır
+            if not self.beyaz_sira:  # Siyah oynadıysa
+                self.hamle_sayisi += 1
 
-        else:
-            # Normal hamle
-            self.tas_ekle(hedef, renk, tur)
+            return True
 
-        # Rok haklarını güncelle
-        self._rok_haklarini_guncelle(kaynak, hedef, renk, tur)
-
-        # En passant karesi sıfırla (iki kare piyon hamlesi dışında)
-        if ozel_hamle != 'iki_kare':
-            self.en_passant_kare = -1
-
-        # Sırayı değiştir
-        self.beyaz_sira = not self.beyaz_sira
-
-        # Hamle sayısını artır
-        if not self.beyaz_sira:  # Siyah oynadıysa
-            self.hamle_sayisi += 1
-
-        return True
+        except Exception as e:
+            print(f"DEBUG: Hamle yapma hatası: {e}, hamle: {hamle}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _rok_haklarini_guncelle(self, kaynak, hedef, renk, tur):
         """Rok haklarını güncelle"""
