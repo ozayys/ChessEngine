@@ -69,16 +69,28 @@ def test_tahta_olusturma():
             print("✗ a1'de beyaz kale yok")
             return False
         
-        if tahta.tas_turu_al(4) == ('beyaz', 'sah'):
-            print("✓ e1'de beyaz şah var")
+        if tahta.tas_turu_al(3) == ('beyaz', 'sah'):
+            print("✓ d1'de beyaz şah var")
         else:
-            print("✗ e1'de beyaz şah yok")
+            print("✗ d1'de beyaz şah yok")
             return False
         
-        if tahta.tas_turu_al(60) == ('siyah', 'sah'):
-            print("✓ e8'de siyah şah var")
+        if tahta.tas_turu_al(4) == ('beyaz', 'vezir'):
+            print("✓ e1'de beyaz vezir var")
         else:
-            print("✗ e8'de siyah şah yok")
+            print("✗ e1'de beyaz vezir yok")
+            return False
+        
+        if tahta.tas_turu_al(59) == ('siyah', 'sah'):
+            print("✓ d8'de siyah şah var")
+        else:
+            print("✗ d8'de siyah şah yok")
+            return False
+        
+        if tahta.tas_turu_al(60) == ('siyah', 'vezir'):
+            print("✓ e8'de siyah vezir var")
+        else:
+            print("✗ e8'de siyah vezir yok")
             return False
         
         return True

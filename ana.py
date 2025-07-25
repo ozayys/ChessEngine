@@ -44,6 +44,11 @@ class SatrancGUI:
         self.mumkun_hamleler = []
         self.oyun_bitti = False
         self.motor_dusunuyor = False
+        
+        # Değerlendirme bilgileri
+        self.son_degerlendirme = 0
+        self.dugum_sayisi = 0
+        self.son_hamle = None
 
         # Taş resimlerini yükle
         self.tas_resimleri = {}
@@ -87,7 +92,7 @@ class SatrancGUI:
         x, y = mouse_pos
         if x < self.TAHTA_BOYUTU and y < self.TAHTA_BOYUTU:
             sutun = x // self.KARE_BOYUTU
-            satir = y // self.KARE_BOYUTU
+            satir = 7 - (y // self.KARE_BOYUTU)  # Tahtayı ters çevir
             return satir * 8 + sutun
         return None
 
@@ -96,7 +101,7 @@ class SatrancGUI:
         satir = kare_indeksi // 8
         sutun = kare_indeksi % 8
         x = sutun * self.KARE_BOYUTU
-        y = satir * self.KARE_BOYUTU
+        y = (7 - satir) * self.KARE_BOYUTU  # Tahtayı ters çevir
         return x, y
 
     def tahta_ciz(self):
@@ -180,6 +185,12 @@ class SatrancGUI:
             text_rect.center = (x + self.KARE_BOYUTU // 2, y + self.KARE_BOYUTU // 2)
             self.ekran.blit(text, text_rect)
 
+    def _kare_notasyonu(self, kare_indeksi):
+        """Kare indeksini satranç notasyonuna çevir (örn: 0 -> a1)"""
+        satir = kare_indeksi // 8
+        sutun = kare_indeksi % 8
+        return chr(ord('a') + sutun) + str(satir + 1)
+
     def panel_ciz(self):
         """Sağ paneli çiz"""
         panel_rect = pygame.Rect(self.TAHTA_BOYUTU, 0, self.PANEL_GENISLIGI, self.EKRAN_YUKSEKLIGI)
@@ -207,7 +218,35 @@ class SatrancGUI:
         hamle_text = f"Hamle: {hamle_sayisi}"
         text = self.kucuk_font.render(hamle_text, True, self.YAZI_RENK)
         self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
-        y_offset += 50
+        y_offset += 30
+
+        # Değerlendirme skoru
+        degerlendirme_text = f"Skor: {self.son_degerlendirme:+.1f}"
+        if self.son_degerlendirme > 0:
+            renk = (150, 255, 150)  # Açık yeşil - beyaz iyi
+        elif self.son_degerlendirme < 0:
+            renk = (255, 150, 150)  # Açık kırmızı - siyah iyi  
+        else:
+            renk = self.YAZI_RENK
+        text = self.kucuk_font.render(degerlendirme_text, True, renk)
+        self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+        y_offset += 25
+
+        # Düğüm sayısı
+        dugum_text = f"Düğüm: {self.dugum_sayisi}"
+        text = self.kucuk_font.render(dugum_text, True, self.YAZI_RENK)
+        self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+        y_offset += 25
+
+        # Son hamle
+        if self.son_hamle:
+            # Hamleyi insan okunabilir formatta göster
+            kaynak_str = self._kare_notasyonu(self.son_hamle[0])
+            hedef_str = self._kare_notasyonu(self.son_hamle[1])
+            hamle_str = f"Son: {kaynak_str}-{hedef_str}"
+            text = self.kucuk_font.render(hamle_str, True, self.YAZI_RENK)
+            self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+            y_offset += 30
 
         # Kontroller
         controls = [
@@ -279,7 +318,16 @@ class SatrancGUI:
         for hamle in self.mumkun_hamleler:
             if hamle[0] == kaynak and hamle[1] == hedef:
                 try:
-                    return self.tahta.hamle_yap(hamle)
+                    if self.tahta.hamle_yap(hamle):
+                        self.son_hamle = hamle
+                        
+                        # Pozisyonu değerlendir
+                        from Degerlendirme import Degerlendirici
+                        degerlendirici = Degerlendirici()
+                        self.son_degerlendirme = degerlendirici.degerlendir(self.tahta) / 100.0
+                        
+                        return True
+                    return False
                 except Exception as e:
                     return False
         return False
@@ -311,6 +359,16 @@ class SatrancGUI:
                 # Hamleyi yap
                 if self.tahta.hamle_yap(en_iyi_hamle):
                     print(f"Motor hamle yaptı: {en_iyi_hamle}")
+                    self.son_hamle = en_iyi_hamle
+                    
+                    # Arama istatistiklerini güncelle
+                    istatistikler = self.arama.get_istatistikler()
+                    self.dugum_sayisi = istatistikler['dugum_sayisi']
+                    
+                    # Pozisyonu değerlendir
+                    from Degerlendirme import Degerlendirici
+                    degerlendirici = Degerlendirici()
+                    self.son_degerlendirme = degerlendirici.degerlendir(self.tahta) / 100.0  # Centipawn'dan pawn'a çevir
                 else:
                     print("Motor hamle yapamadı!")
             else:
@@ -319,6 +377,8 @@ class SatrancGUI:
                 rastgele_hamle = random.choice(mevcut_hamleler)
                 if self.tahta.hamle_yap(rastgele_hamle):
                     print(f"Motor rastgele hamle yaptı: {rastgele_hamle}")
+                    self.son_hamle = rastgele_hamle
+                    self.son_degerlendirme = 0
 
         except Exception as e:
             print(f"Motor hamle hatası: {e}")
@@ -333,6 +393,12 @@ class SatrancGUI:
         self.mumkun_hamleler = []
         self.oyun_bitti = False
         self.motor_dusunuyor = False
+        
+        # Değerlendirme bilgilerini sıfırla
+        self.son_degerlendirme = 0
+        self.dugum_sayisi = 0
+        self.son_hamle = None
+        
         pygame.time.set_timer(pygame.USEREVENT + 1, 0)  # Timer'ı iptal et
 
     def calistir(self):
