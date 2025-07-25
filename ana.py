@@ -45,6 +45,12 @@ class SatrancGUI:
         self.oyun_bitti = False
         self.motor_dusunuyor = False
         
+        # Piyon terfisi
+        self.terfi_bekliyor = False
+        self.terfi_kare = None
+        self.terfi_hamle = None
+        self.terfi_secenekleri = ['vezir', 'kale', 'fil', 'at']
+        
         # Değerlendirme bilgileri
         self.son_degerlendirme = 0
         self.dugum_sayisi = 0
@@ -191,6 +197,72 @@ class SatrancGUI:
         sutun = kare_indeksi % 8
         return chr(ord('a') + sutun) + str(satir + 1)
 
+    def terfi_menusu_ciz(self):
+        """Piyon terfisi menüsünü çiz"""
+        if not self.terfi_bekliyor:
+            return
+        
+        # Yarı saydam arka plan
+        overlay = pygame.Surface((self.EKRAN_GENISLIGI, self.EKRAN_YUKSEKLIGI))
+        overlay.set_alpha(200)
+        overlay.fill((0, 0, 0))
+        self.ekran.blit(overlay, (0, 0))
+        
+        # Menü arka planı
+        menu_genislik = 320
+        menu_yukseklik = 100
+        menu_x = (self.TAHTA_BOYUTU - menu_genislik) // 2
+        menu_y = (self.TAHTA_BOYUTU - menu_yukseklik) // 2
+        
+        menu_rect = pygame.Rect(menu_x, menu_y, menu_genislik, menu_yukseklik)
+        pygame.draw.rect(self.ekran, (50, 50, 50), menu_rect)
+        pygame.draw.rect(self.ekran, (200, 200, 200), menu_rect, 3)
+        
+        # Başlık
+        baslik_text = self.font.render("Terfi Seçimi", True, (255, 255, 255))
+        baslik_rect = baslik_text.get_rect(center=(menu_x + menu_genislik // 2, menu_y - 30))
+        self.ekran.blit(baslik_text, baslik_rect)
+        
+        # Taş seçenekleri
+        tas_boyut = 70
+        tas_aralik = 10
+        toplam_genislik = 4 * tas_boyut + 3 * tas_aralik
+        baslangic_x = menu_x + (menu_genislik - toplam_genislik) // 2
+        
+        renk = 'beyaz' if self.tahta.beyaz_sira else 'siyah'
+        
+        for i, tas_turu in enumerate(self.terfi_secenekleri):
+            x = baslangic_x + i * (tas_boyut + tas_aralik)
+            y = menu_y + 15
+            
+            # Seçenek kutusu
+            secenek_rect = pygame.Rect(x, y, tas_boyut, tas_boyut)
+            pygame.draw.rect(self.ekran, (100, 100, 100), secenek_rect)
+            pygame.draw.rect(self.ekran, (255, 255, 255), secenek_rect, 2)
+            
+            # Taş resmi
+            if (renk, tas_turu) in self.tas_resimleri:
+                resim = self.tas_resimleri[(renk, tas_turu)]
+                # Menü için yeniden boyutlandır
+                resim = pygame.transform.scale(resim, (tas_boyut - 10, tas_boyut - 10))
+                resim_rect = resim.get_rect(center=(x + tas_boyut // 2, y + tas_boyut // 2))
+                self.ekran.blit(resim, resim_rect)
+            
+            # Hover efekti için rect'i sakla
+            setattr(self, f'terfi_{tas_turu}_rect', secenek_rect)
+
+    def terfi_menusu_tikla(self, mouse_pos):
+        """Terfi menüsünde tıklama kontrolü"""
+        if not self.terfi_bekliyor:
+            return None
+        
+        for tas_turu in self.terfi_secenekleri:
+            rect = getattr(self, f'terfi_{tas_turu}_rect', None)
+            if rect and rect.collidepoint(mouse_pos):
+                return tas_turu
+        
+        return None
+
     def panel_ciz(self):
         """Sağ paneli çiz"""
         panel_rect = pygame.Rect(self.TAHTA_BOYUTU, 0, self.PANEL_GENISLIGI, self.EKRAN_YUKSEKLIGI)
@@ -286,7 +358,7 @@ class SatrancGUI:
 
     def kare_secimi_isle(self, kare):
         """Kare seçimini işle"""
-        if self.motor_dusunuyor:
+        if self.motor_dusunuyor or self.terfi_bekliyor:
             return
 
         # Oyun bitti mi kontrol et
@@ -356,6 +428,14 @@ class SatrancGUI:
         """Hamle yapmaya çalış"""
         for hamle in self.mumkun_hamleler:
             if hamle[0] == kaynak and hamle[1] == hedef:
+                # Piyon terfisi kontrolü
+                if len(hamle) > 3 and hamle[3] in ['terfi', 'terfi_alma']:
+                    # Terfi menüsünü göster
+                    self.terfi_bekliyor = True
+                    self.terfi_kare = hedef
+                    self.terfi_hamle = hamle
+                    return False  # Henüz hamle yapma, terfi seçimi bekle
+                
                 try:
                     if self.tahta.hamle_yap(hamle):
                         self.son_hamle = hamle
@@ -371,6 +451,39 @@ class SatrancGUI:
                     return False
                 except Exception as e:
                     return False
+        return False
+
+    def terfi_hamlesini_yap(self, terfi_tasi):
+        """Terfi hamlesini seçilen taş ile yap"""
+        if not self.terfi_bekliyor or not self.terfi_hamle:
+            return False
+        
+        # Terfi hamlesini güncelle
+        hamle = list(self.terfi_hamle)
+        if len(hamle) > 4:
+            hamle[4] = terfi_tasi
+        else:
+            hamle.append(terfi_tasi)
+        
+        try:
+            if self.tahta.hamle_yap(hamle):
+                self.son_hamle = hamle
+                
+                # Pozisyonu değerlendir
+                from Degerlendirme import Degerlendirici
+                degerlendirici = Degerlendirici()
+                raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                self.son_degerlendirme = raw_skor / 100.0
+                
+                # Terfi durumunu sıfırla
+                self.terfi_bekliyor = False
+                self.terfi_kare = None
+                self.terfi_hamle = None
+                
+                return True
+        except Exception as e:
+            print(f"Terfi hamlesi hatası: {e}")
+        
         return False
 
     def motor_hamle_yap(self):
@@ -445,6 +558,11 @@ class SatrancGUI:
         self.oyun_bitti = False
         self.motor_dusunuyor = False
         
+        # Piyon terfisi durumunu sıfırla
+        self.terfi_bekliyor = False
+        self.terfi_kare = None
+        self.terfi_hamle = None
+        
         # Değerlendirme bilgilerini sıfırla
         self.son_degerlendirme = 0
         self.dugum_sayisi = 0
@@ -478,9 +596,27 @@ class SatrancGUI:
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Sol tık
-                        kare = self.kare_koordinati_al(event.pos)
-                        if kare is not None:
-                            self.kare_secimi_isle(kare)
+                        # Terfi menüsü açıksa önce onu kontrol et
+                        if self.terfi_bekliyor:
+                            terfi_secimi = self.terfi_menusu_tikla(event.pos)
+                            if terfi_secimi:
+                                if self.terfi_hamlesini_yap(terfi_secimi):
+                                    self.secili_kare = None
+                                    self.mumkun_hamleler = []
+                                    
+                                    # Oyun bitti mi kontrol et
+                                    if self.tahta.oyun_bitti_mi():
+                                        self.oyun_bitti = True
+                                        continue
+                                    
+                                    # Motor sırası başlat
+                                    if not self.tahta.beyaz_sira:
+                                        pygame.time.set_timer(pygame.USEREVENT + 1, 500)
+                        else:
+                            # Normal kare seçimi
+                            kare = self.kare_koordinati_al(event.pos)
+                            if kare is not None:
+                                self.kare_secimi_isle(kare)
 
             # Ekranı temizle ve çiz
             self.ekran.fill((0, 0, 0))
@@ -489,6 +625,9 @@ class SatrancGUI:
             self.mumkun_hamleleri_ciz()
             self.taslari_ciz()
             self.panel_ciz()
+            
+            # Terfi menüsü varsa onu da çiz
+            self.terfi_menusu_ciz()
 
             pygame.display.flip()
             clock.tick(60)
