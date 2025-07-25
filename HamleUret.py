@@ -55,15 +55,57 @@ class HamleUretici:
                 if sutun > 0: mask |= 1 << ((satir - 1) * 8 + sutun - 1)
                 if sutun < 7: mask |= 1 << ((satir - 1) * 8 + sutun + 1)
             self.siyah_piyon_saldiri[kare] = mask
+            
+        # Sliding piece maskeleri (kale ve fil için)
+        self._sliding_maskeleri_olustur()
+        
+    def _sliding_maskeleri_olustur(self):
+        """Kale ve fil için satır/sütun/köşegen maskeleri"""
+        self.satir_maske = [0] * 64
+        self.sutun_maske = [0] * 64
+        self.ana_kosegen_maske = [0] * 64
+        self.yan_kosegen_maske = [0] * 64
+        
+        for kare in range(64):
+            satir, sutun = divmod(kare, 8)
+            
+            # Satır maskesi
+            for s in range(8):
+                self.satir_maske[kare] |= 1 << (satir * 8 + s)
+                
+            # Sütun maskesi
+            for r in range(8):
+                self.sutun_maske[kare] |= 1 << (r * 8 + sutun)
+                
+            # Ana köşegen maskesi
+            r, s = satir, sutun
+            while r >= 0 and s >= 0:
+                self.ana_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r -= 1
+                s -= 1
+            r, s = satir + 1, sutun + 1
+            while r < 8 and s < 8:
+                self.ana_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r += 1
+                s += 1
+                
+            # Yan köşegen maskesi
+            r, s = satir, sutun
+            while r >= 0 and s < 8:
+                self.yan_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r -= 1
+                s += 1
+            r, s = satir + 1, sutun - 1
+            while r < 8 and s >= 0:
+                self.yan_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r += 1
+                s -= 1
 
     def tum_hamleleri_uret(self, tahta):
         """Mevcut pozisyon için tüm pseudo-legal hamleleri üret"""
         self.hamleler = []
         renk = 'beyaz' if tahta.beyaz_sira else 'siyah'
         
-        # Şah kontrolü - şah çekilmişse özel durum
-        sah_tehdidinde = tahta.sah_tehdit_altinda_mi(renk)
-
         if renk == 'beyaz':
             self._piyon_hamleleri_uret(tahta, True)
             self._at_hamleleri_uret(tahta, True)
@@ -79,8 +121,6 @@ class HamleUretici:
             self._vezir_hamleleri_uret(tahta, False)
             self._sah_hamleleri_uret(tahta, False)
 
-        # NOT: Legal hamle filtrelemesi LegalHamleBulucu sınıfında yapılacak
-        # Bu sınıf sadece pseudo-legal hamleleri üretir
         return self.hamleler
 
     def saldiri_altinda_mi(self, tahta, kare, beyaz_saldiri):
@@ -98,7 +138,7 @@ class HamleUretici:
             # Şah saldırıları
             if self.sah_hamle_maskeleri[kare] & tahta.beyaz_sah:
                 return True
-
+                
             # Çizgisel saldırılar (kale, vezir)
             if self._cizgisel_saldiri_kontrol(tahta, kare, tahta.beyaz_kale | tahta.beyaz_vezir):
                 return True

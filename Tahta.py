@@ -3,6 +3,8 @@ Bitboard tabanlı satranç tahtası implementasyonu.
 64-bit integer ile her taş türü ve rengi için ayrı bitboard.
 """
 
+from Zobrist import ZobristHash
+
 
 class Tahta:
     def __init__(self):
@@ -33,6 +35,10 @@ class Tahta:
 
         # Precalculated masks ve tablolar
         self._maskeleri_hazirla()
+
+        # Zobrist hash - maskeleri hazırladıktan sonra
+        self.zobrist = ZobristHash()
+        self.hash = self.zobrist.hash_hesapla(self)
 
     def _maskeleri_hazirla(self):
         """Sık kullanılan bit maskelerini önceden hesapla"""
@@ -70,10 +76,11 @@ class Tahta:
 
     def tas_turu_al(self, kare):
         """Belirtilen karedeki taşın türünü ve rengini döndür"""
-        if not self.bit_kontrol_et(kare):
-            return None
-
         mask = self.kare_maskeleri[kare]
+        
+        # Önce boş kare kontrolü - hızlı çıkış
+        if not (self.tum_taslar & mask):
+            return None
 
         # Beyaz taşlar
         if self.beyaz_piyon & mask: return ('beyaz', 'piyon')
@@ -306,14 +313,18 @@ class Tahta:
 
     def bit_sayisi(self, bitboard):
         """Bitboard'daki set bit sayısını döndür (popcount)"""
-        return bin(bitboard).count('1')
-
+        count = 0
+        while bitboard:
+            count += 1
+            bitboard &= bitboard - 1  # Brian Kernighan algoritması
+        return count
+        
     def en_dusuk_bit_al(self, bitboard):
-        """En düşük set bit'in pozisyonunu al"""
+        """En düşük set bit'in pozisyonunu döndür"""
         if bitboard == 0:
             return -1
         return (bitboard & -bitboard).bit_length() - 1
-
+        
     def en_dusuk_bit_kaldir(self, bitboard):
         """En düşük set bit'i kaldır"""
         return bitboard & (bitboard - 1)

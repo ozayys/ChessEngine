@@ -1,6 +1,6 @@
 """
 Legal hamle bulucu. Pseudo-legal hamleleri alır ve legal olanları filtreler.
-Şah kontrolü ve geçici hamle uygulama sistemi.
+Şah kontrolü ve geçici hamle uygulama sistemi - optimize edilmiş.
 """
 
 from HamleUret import HamleUretici
@@ -10,17 +10,54 @@ class LegalHamleBulucu:
     def __init__(self):
         self.hamle_uretici = HamleUretici()
         self.legal_hamleler = []
+        
+        # Saldırı cache'i
+        self._saldiri_cache = {}
 
     def legal_hamleleri_bul(self, tahta):
         """Mevcut pozisyon için tüm legal hamleleri bul"""
         self.legal_hamleler = []
+        self._saldiri_cache.clear()  # Cache'i temizle
+        
         pseudo_legal_hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
 
         for hamle in pseudo_legal_hamleler:
-            if self.hamle_legal_mi(tahta, hamle):
+            if self.hamle_legal_mi_hizli(tahta, hamle):
                 self.legal_hamleler.append(hamle)
 
         return self.legal_hamleler
+
+    def hamle_legal_mi_hizli(self, tahta, hamle):
+        """Hamle legal mi kontrol et - optimize edilmiş"""
+        kaynak, hedef = hamle[0], hamle[1]
+        hamle_turu = hamle[3] if len(hamle) > 3 else 'normal'
+        
+        # Basit durum: Normal hamle veya alma
+        if hamle_turu in ['normal', 'alma']:
+            # Taşı hareket ettir
+            kaynak_tas = tahta.tas_turu_al(kaynak)
+            hedef_tas = tahta.tas_turu_al(hedef)
+            
+            # Geçici hareket
+            tahta.tas_kaldir(kaynak)
+            tahta.tas_kaldir(hedef)
+            tahta.tas_ekle(hedef, kaynak_tas[0], kaynak_tas[1])
+            
+            # Şah kontrolü
+            renk = kaynak_tas[0]
+            legal = not self._sah_tehdidinde_mi_hizli(tahta, renk)
+            
+            # Geri al
+            tahta.tas_kaldir(hedef)
+            tahta.tas_ekle(kaynak, kaynak_tas[0], kaynak_tas[1])
+            if hedef_tas:
+                tahta.tas_ekle(hedef, hedef_tas[0], hedef_tas[1])
+                
+            return legal
+            
+        else:
+            # Karmaşık hamleler için eski yöntemi kullan
+            return self.hamle_legal_mi(tahta, hamle)
 
     def hamle_legal_mi(self, tahta, hamle):
         """Belirtilen hamle legal mi kontrol et"""
@@ -34,6 +71,29 @@ class LegalHamleBulucu:
         self.hamle_geri_al(tahta, hamle, onceki_durum)
 
         return legal
+        
+    def _sah_tehdidinde_mi_hizli(self, tahta, renk):
+        """Şah tehdidinde mi - optimize edilmiş"""
+        # Şah pozisyonunu bul
+        sah_bitboard = tahta.beyaz_sah if renk == 'beyaz' else tahta.siyah_sah
+        if not sah_bitboard:
+            return False
+            
+        sah_kare = (sah_bitboard & -sah_bitboard).bit_length() - 1
+        
+        # Düşman taşlarını belirle
+        dusman_beyaz = renk != 'beyaz'
+        
+        # Cache kontrolü
+        cache_key = (tahta.hash, sah_kare, dusman_beyaz)
+        if cache_key in self._saldiri_cache:
+            return self._saldiri_cache[cache_key]
+            
+        # Saldırı kontrolü
+        sonuc = self.hamle_uretici.saldiri_altinda_mi(tahta, sah_kare, dusman_beyaz)
+        self._saldiri_cache[cache_key] = sonuc
+        
+        return sonuc
 
     def hamle_uygula_gecici(self, tahta, hamle):
         """Hamleyi geçici olarak uygula ve önceki durumu kaydet"""

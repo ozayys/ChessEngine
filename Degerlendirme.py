@@ -26,6 +26,23 @@ class Degerlendirici:
 
         # Maksimum malzeme skoru (açılış pozisyonu)
         self.max_malzeme_skoru = 78  # 16*0 + 4*1 + 4*1 + 4*2 + 2*4
+        
+        # Popcount lookup table for faster bit counting
+        self._init_popcount_table()
+
+    def _init_popcount_table(self):
+        """Popcount için lookup table oluştur"""
+        self.popcount_table = [0] * 256
+        for i in range(256):
+            self.popcount_table[i] = bin(i).count('1')
+
+    def popcount(self, n):
+        """Hızlı bit sayma"""
+        count = 0
+        while n:
+            count += self.popcount_table[n & 0xFF]
+            n >>= 8
+        return count
 
     def degerlendir(self, tahta):
         """Arama modülü tarafından çağrılan ana değerlendirme fonksiyonu"""
@@ -163,60 +180,107 @@ class Degerlendirici:
         return skor
 
     def malzeme_dengesi_hesapla(self, tahta):
-        """Malzeme dengesini hesapla"""
+        """Toplam malzeme dengesini hesapla"""
         beyaz_malzeme = 0
         siyah_malzeme = 0
 
-        try:
-            # Bitboard'ları kullanarak hızlı hesaplama
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_piyon) * self.tas_degerleri['piyon']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_at) * self.tas_degerleri['at']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_fil) * self.tas_degerleri['fil']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_kale) * self.tas_degerleri['kale']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir) * self.tas_degerleri['vezir']
+        # Bitboard tabanlı hızlı malzeme sayımı
+        beyaz_malzeme += self.popcount(tahta.beyaz_piyon) * self.tas_degerleri['piyon']
+        beyaz_malzeme += self.popcount(tahta.beyaz_at) * self.tas_degerleri['at']
+        beyaz_malzeme += self.popcount(tahta.beyaz_fil) * self.tas_degerleri['fil']
+        beyaz_malzeme += self.popcount(tahta.beyaz_kale) * self.tas_degerleri['kale']
+        beyaz_malzeme += self.popcount(tahta.beyaz_vezir) * self.tas_degerleri['vezir']
 
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_piyon) * self.tas_degerleri['piyon']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_at) * self.tas_degerleri['at']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_fil) * self.tas_degerleri['fil']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_kale) * self.tas_degerleri['kale']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_vezir) * self.tas_degerleri['vezir']
-        except:
-            # Bitboard metodları yoksa basit malzeme sayımı yap
-            for kare in range(64):
-                tas_info = tahta.karedeki_tas(kare)
-                if tas_info:
-                    renk, tas_turu = tas_info
-                    if tas_turu in self.tas_degerleri:
-                        if renk == 'beyaz':
-                            beyaz_malzeme += self.tas_degerleri[tas_turu]
-                        else:
-                            siyah_malzeme += self.tas_degerleri[tas_turu]
+        siyah_malzeme += self.popcount(tahta.siyah_piyon) * self.tas_degerleri['piyon']
+        siyah_malzeme += self.popcount(tahta.siyah_at) * self.tas_degerleri['at']
+        siyah_malzeme += self.popcount(tahta.siyah_fil) * self.tas_degerleri['fil']
+        siyah_malzeme += self.popcount(tahta.siyah_kale) * self.tas_degerleri['kale']
+        siyah_malzeme += self.popcount(tahta.siyah_vezir) * self.tas_degerleri['vezir']
 
         return beyaz_malzeme - siyah_malzeme
 
     def pozisyonel_deger_hesapla(self, tahta):
         """Piece-Square Table kullanarak pozisyonel değer hesapla"""
         skor = 0
+        oyun_fazi = self.oyun_fazi_hesapla(tahta)
 
-        try:
-            oyun_fazi = self.oyun_fazi_hesapla(tahta)
-        except:
-            oyun_fazi = 0.5  # Varsayılan orta oyun
+        # Beyaz taşlar için PST değerleri
+        bitboard = tahta.beyaz_piyon
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor += self.piyon_pst[kare]
+            bitboard &= bitboard - 1
 
-        # Tüm taşlar için PST değerlerini hesapla
-        for kare in range(64):
-            try:
-                tas_bilgisi = tahta.karedeki_tas(kare)
-                if tas_bilgisi:
-                    renk, tur = tas_bilgisi
-                    pst_degeri = self.pst_deger_al(tur, kare, renk, oyun_fazi)
+        bitboard = tahta.beyaz_at
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor += self.at_pst[kare]
+            bitboard &= bitboard - 1
 
-                    if renk == 'beyaz':
-                        skor += pst_degeri
-                    else:
-                        skor -= pst_degeri
-            except:
-                continue
+        bitboard = tahta.beyaz_fil
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor += self.fil_pst[kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.beyaz_kale
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor += self.kale_pst[kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.beyaz_vezir
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor += self.vezir_pst[kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.beyaz_sah
+        if bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            if oyun_fazi > 0.5:
+                skor += self.sah_son_pst[kare]
+            else:
+                skor += self.sah_acilis_pst[kare]
+
+        # Siyah taşlar için PST değerleri (ters çevrilmiş)
+        bitboard = tahta.siyah_piyon
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor -= self.piyon_pst[63 - kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.siyah_at
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor -= self.at_pst[63 - kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.siyah_fil
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor -= self.fil_pst[63 - kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.siyah_kale
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor -= self.kale_pst[63 - kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.siyah_vezir
+        while bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            skor -= self.vezir_pst[63 - kare]
+            bitboard &= bitboard - 1
+
+        bitboard = tahta.siyah_sah
+        if bitboard:
+            kare = (bitboard & -bitboard).bit_length() - 1
+            if oyun_fazi > 0.5:
+                skor -= self.sah_son_pst[63 - kare]
+            else:
+                skor -= self.sah_acilis_pst[63 - kare]
 
         return skor
 
@@ -239,51 +303,28 @@ class Degerlendirici:
 
     def oyun_fazi_hesapla(self, tahta):
         """Oyun fazını hesapla (0=açılış, 1=son oyun)"""
-        try:
-            mevcut_malzeme = 0
+        mevcut_malzeme = 0
 
-            # Piyon hariç malzeme sayısını hesapla
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_at) * self.faz_malzeme_degerleri['at']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_fil) * self.faz_malzeme_degerleri['fil']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_kale) * self.faz_malzeme_degerleri['kale']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir) * self.faz_malzeme_degerleri['vezir']
+        # Piyon hariç malzeme sayısını hesapla
+        mevcut_malzeme += self.popcount(tahta.beyaz_at) * self.faz_malzeme_degerleri['at']
+        mevcut_malzeme += self.popcount(tahta.beyaz_fil) * self.faz_malzeme_degerleri['fil']
+        mevcut_malzeme += self.popcount(tahta.beyaz_kale) * self.faz_malzeme_degerleri['kale']
+        mevcut_malzeme += self.popcount(tahta.beyaz_vezir) * self.faz_malzeme_degerleri['vezir']
 
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_at) * self.faz_malzeme_degerleri['at']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_fil) * self.faz_malzeme_degerleri['fil']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_kale) * self.faz_malzeme_degerleri['kale']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_vezir) * self.faz_malzeme_degerleri['vezir']
+        mevcut_malzeme += self.popcount(tahta.siyah_at) * self.faz_malzeme_degerleri['at']
+        mevcut_malzeme += self.popcount(tahta.siyah_fil) * self.faz_malzeme_degerleri['fil']
+        mevcut_malzeme += self.popcount(tahta.siyah_kale) * self.faz_malzeme_degerleri['kale']
+        mevcut_malzeme += self.popcount(tahta.siyah_vezir) * self.faz_malzeme_degerleri['vezir']
 
-            # Oyun fazı oranını hesapla
-            faz_orani = 1.0 - (mevcut_malzeme / self.max_malzeme_skoru)
-            return max(0.0, min(1.0, faz_orani))
-        except:
-            return 0.5  # Varsayılan orta oyun
+        # Oyun fazı oranını hesapla
+        faz_orani = 1.0 - (mevcut_malzeme / self.max_malzeme_skoru)
+        return max(0.0, min(1.0, faz_orani))
 
     def mobilite_hesapla(self, tahta):
-        """Taş mobilitesini hesapla"""
-        # Basit mobilite hesaplama - geliştirilmesi gerekebilir
-        try:
-            from HamleUret import HamleUretici
-            hamle_uretici = HamleUretici()
-
-            # Mevcut sırayı kaydet
-            orijinal_sira = tahta.beyaz_sira
-
-            # Beyaz hamleleri
-            tahta.beyaz_sira = True
-            beyaz_hamleler = len(hamle_uretici.tum_hamleleri_uret(tahta))
-
-            # Siyah hamleleri
-            tahta.beyaz_sira = False
-            siyah_hamleler = len(hamle_uretici.tum_hamleleri_uret(tahta))
-
-            # Sırayı geri yükle
-            tahta.beyaz_sira = orijinal_sira
-
-            mobilite_fark = (beyaz_hamleler - siyah_hamleler) * 5
-            return mobilite_fark
-        except:
-            return 0
+        """Taş mobilitesini hesapla - basitleştirilmiş"""
+        # Mobilite hesaplamayı geçici olarak devre dışı bırak
+        # Çok yavaşlatıyor, daha optimize bir yöntem gerekli
+        return 0
 
     def sah_guvenlik_hesapla(self, tahta):
         """Şah güvenliğini hesapla"""
