@@ -11,15 +11,15 @@ class Tahta:
         self.beyaz_kale = 0x0000000000000081
         self.beyaz_at = 0x0000000000000042
         self.beyaz_fil = 0x0000000000000024
-        self.beyaz_vezir = 0x0000000000000010
-        self.beyaz_sah = 0x0000000000000008
+        self.beyaz_vezir = 0x0000000000000008
+        self.beyaz_sah = 0x0000000000000010
 
         self.siyah_piyon = 0x00FF000000000000
         self.siyah_kale = 0x8100000000000000
         self.siyah_at = 0x4200000000000000
         self.siyah_fil = 0x2400000000000000
-        self.siyah_vezir = 0x1000000000000000
-        self.siyah_sah = 0x0800000000000000
+        self.siyah_vezir = 0x0800000000000000
+        self.siyah_sah = 0x1000000000000000
 
         # Hamle hakları ve durumlar
         self.beyaz_sira = True
