@@ -15,6 +15,15 @@ class MatPatKontrolcu:
         Oyun durumunu kontrol et
         Returns: 'devam', 'mat_beyaz', 'mat_siyah', 'pat'
         """
+        # ÖNEMLİ: Önce şahların tahtada olup olmadığını kontrol et!
+        beyaz_sah_var = tahta.bit_sayisi(tahta.beyaz_sah) > 0
+        siyah_sah_var = tahta.bit_sayisi(tahta.siyah_sah) > 0
+        
+        if not beyaz_sah_var:
+            return 'mat_siyah'  # Beyaz şah alındı = Siyah kazandı
+        if not siyah_sah_var:
+            return 'mat_beyaz'  # Siyah şah alındı = Beyaz kazandı
+        
         legal_hamleler = self._legal_hamleleri_bul(tahta)
         
         if len(legal_hamleler) == 0:

@@ -250,8 +250,22 @@ class GelismisArama:
         def hamle_oncelik(hamle):
             puan = 0
             
-            # 1. Alma hamleleri (MVV-LVA)
+            # 0. EN ÖNEMLİ: Mat veren hamleler (şah alma)
             hedef_kare = hamle[1]
+            if tahta.bit_kontrol_et(hedef_kare):
+                hedef_tas = tahta.tas_turu_al(hedef_kare)
+                if hedef_tas and hedef_tas[1] == 'sah':
+                    puan += 1000000  # ŞAH ALMA EN YÜKSEK ÖNCELİK!
+                    return puan
+            
+            # Mat kontrolü - hamle sonrası mat oluyor mu?
+            tahta_test = tahta.kopyala()
+            if tahta_test.hamle_yap(hamle):
+                if self.mat_kontrolcu.is_mate(tahta_test):
+                    puan += 500000  # Mat pozisyonu ikinci öncelik
+                    return puan
+            
+            # 1. Alma hamleleri (MVV-LVA)
             if tahta.bit_kontrol_et(hedef_kare):
                 hedef_tas = tahta.tas_turu_al(hedef_kare)
                 kaynak_tas = tahta.tas_turu_al(hamle[0])

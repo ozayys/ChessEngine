@@ -326,8 +326,15 @@ class SatrancGUI:
             if hamle_yapildi:
                 self.secili_kare = None
                 self.mumkun_hamleler = []
-                # Motor sırası başlat - sadece siyah sırasıysa
-                if not self.tahta.beyaz_sira:
+                
+                # DERHAL oyun durumu kontrolü - şah alındı mı?
+                if self.mat_kontrolcu:
+                    self._oyun_durumu_kontrol()
+                    if self.oyun_bitti:
+                        return  # Oyun bittiyse motor hamlesine geçme
+                
+                # Motor sırası başlat - sadece siyah sırasıysa ve oyun devam ediyorsa
+                if not self.tahta.beyaz_sira and not self.oyun_bitti:
                     pygame.time.set_timer(pygame.USEREVENT + 1, 500)  # 500ms sonra motor hamlesini başlat
             else:
                 # Yeni kare seç
@@ -411,10 +418,16 @@ class SatrancGUI:
             
             if en_iyi_hamle:
                 # Hamleyi yap
-                if self.tahta.hamle_yap(en_iyi_hamle):
+                                if self.tahta.hamle_yap(en_iyi_hamle):
                     print(f"Motor hamle yaptı: {en_iyi_hamle}")
                     self.son_hamle = en_iyi_hamle
-                    
+
+                    # DERHAL oyun durumu kontrol et!
+                    if self.mat_kontrolcu:
+                        self._oyun_durumu_kontrol()
+                        if self.oyun_bitti:
+                            return  # Oyun bittiyse değerlendirme yapma
+
                     # Pozisyonu değerlendir (beyaz perspektifinden)
                     from Degerlendirme import Degerlendirici
                     degerlendirici = Degerlendirici()
@@ -518,6 +531,10 @@ class SatrancGUI:
                         kare = self.kare_koordinati_al(event.pos)
                         if kare is not None:
                             self.kare_secimi_isle(kare)
+
+            # Her frame'de oyun durumu kontrol et
+            if self.mat_kontrolcu and not self.oyun_bitti:
+                self._oyun_durumu_kontrol()
 
             # Ekranı temizle ve çiz
             self.ekran.fill((0, 0, 0))

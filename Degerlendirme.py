@@ -132,6 +132,15 @@ class Degerlendirici:
 
     def pozisyon_degerlendir(self, tahta):
         """Ana değerlendirme fonksiyonu"""
+        # ÖNEMLİ: Şah kontrolü önce!
+        beyaz_sah_var = tahta.bit_sayisi(tahta.beyaz_sah) > 0
+        siyah_sah_var = tahta.bit_sayisi(tahta.siyah_sah) > 0
+        
+        if not beyaz_sah_var:
+            return -100000  # Beyaz şah yok = Siyah kazandı
+        if not siyah_sah_var:
+            return 100000   # Siyah şah yok = Beyaz kazandı
+        
         skor = 0
 
         # Malzeme ve pozisyonel değerlendirme

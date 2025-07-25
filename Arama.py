@@ -67,18 +67,23 @@ class Arama:
         return en_iyi_hamle
 
     def _hamleleri_sirala(self, tahta, hamleler):
-        """Hamleleri sırala (alma hamleleri önce)"""
+        """Hamleleri sırala (şah alma önce, sonra alma hamleleri)"""
+        sah_alma = []
         alma_hamleler = []
         normal_hamleler = []
         
         for hamle in hamleler:
             hedef_kare = hamle[1]
             if tahta.bit_kontrol_et(hedef_kare):  # Hedef karede taş var
-                alma_hamleler.append(hamle)
+                hedef_tas = tahta.tas_turu_al(hedef_kare)
+                if hedef_tas and hedef_tas[1] == 'sah':
+                    sah_alma.append(hamle)  # ŞAH ALMA EN ÖNCE!
+                else:
+                    alma_hamleler.append(hamle)
             else:
                 normal_hamleler.append(hamle)
         
-        return alma_hamleler + normal_hamleler
+        return sah_alma + alma_hamleler + normal_hamleler
 
     def alpha_beta(self, tahta, derinlik, alpha, beta, maksimize_ediyor):
         """Alpha-Beta pruning algoritması"""
