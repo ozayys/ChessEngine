@@ -80,7 +80,11 @@ class GelismisArama:
         alpha = float('-inf')
         beta = float('inf')
         
-        hamleler = self._hamleleri_sirala(tahta, self.hamle_uretici.tum_hamleleri_uret(tahta))
+        # Şah altında mı kontrol et ve uygun hamleleri bul
+        if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            hamleler = self._hamleleri_sirala(tahta, self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta))
+        else:
+            hamleler = self._hamleleri_sirala(tahta, self.mat_kontrolcu._legal_hamleleri_bul(tahta))
         
         for i, hamle in enumerate(hamleler):
             if self._zaman_asildi():
@@ -149,7 +153,11 @@ class GelismisArama:
                 self.null_move_kesme += 1
                 return null_score
         
-        hamleler = self._hamleleri_sirala(tahta, self.hamle_uretici.tum_hamleleri_uret(tahta))
+        # Şah altında mı kontrol et ve uygun hamleleri bul
+        if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            hamleler = self._hamleleri_sirala(tahta, self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta))
+        else:
+            hamleler = self._hamleleri_sirala(tahta, self.mat_kontrolcu._legal_hamleleri_bul(tahta))
         
         if not hamleler:
             # Mat veya pat
@@ -315,9 +323,15 @@ class GelismisArama:
         return False
     
     def _alma_hamleleri_bul(self, tahta):
-        """Sadece alma hamleleri bul"""
-        tum_hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
-        return [h for h in tum_hamleler if tahta.bit_kontrol_et(h[1])]
+        """Sadece alma hamleleri bul (legal olanlar)"""
+        # Önce legal hamleleri bul
+        if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            legal_hamleler = self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta)
+        else:
+            legal_hamleler = self.mat_kontrolcu._legal_hamleleri_bul(tahta)
+        
+        # Bunlar arasından alma hamleleri filtrele
+        return [h for h in legal_hamleler if tahta.bit_kontrol_et(h[1])]
     
     def _hamle_degerlendir(self, hamle):
         """Hamlenin değerini tahmin et"""

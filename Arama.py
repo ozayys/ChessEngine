@@ -6,6 +6,7 @@ Gelecekte iterative deepening ve zaman kontrolü eklenecek.
 
 from HamleUret import HamleUretici
 from Degerlendirme import Degerlendirici
+from MatKontrol import MatPatKontrolcu
 import copy
 
 
@@ -14,6 +15,7 @@ class Arama:
         self.derinlik = derinlik
         self.hamle_uretici = HamleUretici()
         self.degerlendirme = Degerlendirici()
+        self.mat_kontrolcu = MatPatKontrolcu()
         self.dugum_sayisi = 0
         self.max_derinlik = 0
 
@@ -30,7 +32,11 @@ class Arama:
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
 
         try:
-            hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+            # Şah altında mı kontrol et ve uygun hamleleri bul
+            if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+                hamleler = self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta)
+            else:
+                hamleler = self.mat_kontrolcu._legal_hamleleri_bul(tahta)
 
             # Hamle yoksa None döndür
             if not hamleler:
@@ -89,7 +95,11 @@ class Arama:
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
-        hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+        # Şah altında mı kontrol et ve uygun hamleleri bul
+        if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            hamleler = self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta)
+        else:
+            hamleler = self.mat_kontrolcu._legal_hamleleri_bul(tahta)
 
         # Hamle yoksa (pat/mat durumu)
         if not hamleler:
@@ -133,7 +143,11 @@ class Arama:
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
-        hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+        # Şah altında mı kontrol et ve uygun hamleleri bul
+        if self.mat_kontrolcu.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            hamleler = self.mat_kontrolcu.sah_altinda_legal_hamleler(tahta)
+        else:
+            hamleler = self.mat_kontrolcu._legal_hamleleri_bul(tahta)
 
         # Hamle yoksa
         if not hamleler:
