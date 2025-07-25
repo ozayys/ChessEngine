@@ -1,6 +1,6 @@
 """
 Legal hamle bulucu. Pseudo-legal hamleleri alır ve legal olanları filtreler.
-Şah kontrolü ve geçici hamle uygulama sistemi.
+Şah kontrolü ve geçici hamle uygulama sistemi - optimize edilmiş.
 """
 
 from HamleUret import HamleUretici
@@ -10,17 +10,54 @@ class LegalHamleBulucu:
     def __init__(self):
         self.hamle_uretici = HamleUretici()
         self.legal_hamleler = []
+        
+        # Saldırı cache'i
+        self._saldiri_cache = {}
 
     def legal_hamleleri_bul(self, tahta):
         """Mevcut pozisyon için tüm legal hamleleri bul"""
         self.legal_hamleler = []
+        self._saldiri_cache.clear()  # Cache'i temizle
+        
         pseudo_legal_hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
 
         for hamle in pseudo_legal_hamleler:
-            if self.hamle_legal_mi(tahta, hamle):
+            if self.hamle_legal_mi_hizli(tahta, hamle):
                 self.legal_hamleler.append(hamle)
 
         return self.legal_hamleler
+
+    def hamle_legal_mi_hizli(self, tahta, hamle):
+        """Hamle legal mi kontrol et - optimize edilmiş"""
+        kaynak, hedef = hamle[0], hamle[1]
+        hamle_turu = hamle[3] if len(hamle) > 3 else 'normal'
+        
+        # Basit durum: Normal hamle veya alma
+        if hamle_turu in ['normal', 'alma']:
+            # Taşı hareket ettir
+            kaynak_tas = tahta.tas_turu_al(kaynak)
+            hedef_tas = tahta.tas_turu_al(hedef)
+            
+            # Geçici hareket
+            tahta.tas_kaldir(kaynak)
+            tahta.tas_kaldir(hedef)
+            tahta.tas_ekle(hedef, kaynak_tas[0], kaynak_tas[1])
+            
+            # Şah kontrolü
+            renk = kaynak_tas[0]
+            legal = not self._sah_tehdidinde_mi_hizli(tahta, renk)
+            
+            # Geri al
+            tahta.tas_kaldir(hedef)
+            tahta.tas_ekle(kaynak, kaynak_tas[0], kaynak_tas[1])
+            if hedef_tas:
+                tahta.tas_ekle(hedef, hedef_tas[0], hedef_tas[1])
+                
+            return legal
+            
+        else:
+            # Karmaşık hamleler için eski yöntemi kullan
+            return self.hamle_legal_mi(tahta, hamle)
 
     def hamle_legal_mi(self, tahta, hamle):
         """Belirtilen hamle legal mi kontrol et"""
@@ -34,6 +71,29 @@ class LegalHamleBulucu:
         self.hamle_geri_al(tahta, hamle, onceki_durum)
 
         return legal
+        
+    def _sah_tehdidinde_mi_hizli(self, tahta, renk):
+        """Şah tehdidinde mi - optimize edilmiş"""
+        # Şah pozisyonunu bul
+        sah_bitboard = tahta.beyaz_sah if renk == 'beyaz' else tahta.siyah_sah
+        if not sah_bitboard:
+            return False
+            
+        sah_kare = (sah_bitboard & -sah_bitboard).bit_length() - 1
+        
+        # Düşman taşlarını belirle
+        dusman_beyaz = renk != 'beyaz'
+        
+        # Cache kontrolü
+        cache_key = (tahta.hash, sah_kare, dusman_beyaz)
+        if cache_key in self._saldiri_cache:
+            return self._saldiri_cache[cache_key]
+            
+        # Saldırı kontrolü
+        sonuc = self.hamle_uretici.saldiri_altinda_mi(tahta, sah_kare, dusman_beyaz)
+        self._saldiri_cache[cache_key] = sonuc
+        
+        return sonuc
 
     def hamle_uygula_gecici(self, tahta, hamle):
         """Hamleyi geçici olarak uygula ve önceki durumu kaydet"""
@@ -243,3 +303,73 @@ class LegalHamleBulucu:
     def hamle_sayisi(self, tahta):
         """Mevcut pozisyondaki legal hamle sayısı"""
         return len(self.legal_hamleleri_bul(tahta))
+
+    def sah_tehdidinden_kurtulma_yolları(self, tahta):
+        """Şah tehdidinden kurtulmanın tüm yollarını bul"""
+        renk = 'beyaz' if tahta.beyaz_sira else 'siyah'
+        
+        # Şah pozisyonunu bul
+        sah_bitboard = tahta.beyaz_sah if renk == 'beyaz' else tahta.siyah_sah
+        sah_kare = (sah_bitboard & -sah_bitboard).bit_length() - 1
+        
+        # Şaha saldıran taşları bul
+        dusman_renk = 'siyah' if renk == 'beyaz' else 'beyaz'
+        saldiran_taslar = self.hamle_uretici.kareye_saldirilar(tahta, sah_kare, dusman_renk)
+        
+        kurtulma_hamleleri = []
+        
+        # 1. Şahı hareket ettir
+        sah_hamleleri = []
+        for hamle in self.hamle_uretici.tum_hamleleri_uret(tahta):
+            if hamle[0] == sah_kare:  # Şah hamlesi
+                if self.hamle_legal_mi(tahta, hamle):
+                    sah_hamleleri.append(hamle)
+                    
+        kurtulma_hamleleri.extend(sah_hamleleri)
+        
+        # Eğer birden fazla taş saldırıyorsa, sadece şah kaçabilir
+        if len(saldiran_taslar) > 1:
+            return kurtulma_hamleleri
+            
+        # Tek saldıran varsa...
+        if len(saldiran_taslar) == 1:
+            saldiran_tur, saldiran_kare = saldiran_taslar[0]
+            
+            # 2. Saldıran taşı al
+            tum_hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+            for hamle in tum_hamleler:
+                if hamle[1] == saldiran_kare and hamle[0] != sah_kare:  # Başka bir taş saldıranı alıyor
+                    if self.hamle_legal_mi(tahta, hamle):
+                        kurtulma_hamleleri.append(hamle)
+                        
+            # 3. Saldırı yolunu engelle (sadece kale, fil, vezir için)
+            if saldiran_tur in ['kale', 'fil', 'vezir']:
+                engelleme_kareleri = self._saldiri_yolu_kareleri(sah_kare, saldiran_kare)
+                
+                for hamle in tum_hamleler:
+                    if hamle[1] in engelleme_kareleri and hamle[0] != sah_kare:
+                        if self.hamle_legal_mi(tahta, hamle):
+                            kurtulma_hamleleri.append(hamle)
+                            
+        return kurtulma_hamleleri
+        
+    def _saldiri_yolu_kareleri(self, hedef_kare, saldiran_kare):
+        """İki kare arasındaki saldırı yolu karelerini bul"""
+        kareler = []
+        
+        hedef_satir, hedef_sutun = divmod(hedef_kare, 8)
+        saldiran_satir, saldiran_sutun = divmod(saldiran_kare, 8)
+        
+        # Yön vektörünü hesapla
+        dy = 0 if hedef_satir == saldiran_satir else (1 if hedef_satir > saldiran_satir else -1)
+        dx = 0 if hedef_sutun == saldiran_sutun else (1 if hedef_sutun > saldiran_sutun else -1)
+        
+        # Saldıran ile hedef arasındaki kareleri bul
+        satir, sutun = saldiran_satir + dy, saldiran_sutun + dx
+        
+        while satir != hedef_satir or sutun != hedef_sutun:
+            kareler.append(satir * 8 + sutun)
+            satir += dy
+            sutun += dx
+            
+        return kareler

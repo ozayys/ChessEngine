@@ -55,15 +55,57 @@ class HamleUretici:
                 if sutun > 0: mask |= 1 << ((satir - 1) * 8 + sutun - 1)
                 if sutun < 7: mask |= 1 << ((satir - 1) * 8 + sutun + 1)
             self.siyah_piyon_saldiri[kare] = mask
+            
+        # Sliding piece maskeleri (kale ve fil için)
+        self._sliding_maskeleri_olustur()
+        
+    def _sliding_maskeleri_olustur(self):
+        """Kale ve fil için satır/sütun/köşegen maskeleri"""
+        self.satir_maske = [0] * 64
+        self.sutun_maske = [0] * 64
+        self.ana_kosegen_maske = [0] * 64
+        self.yan_kosegen_maske = [0] * 64
+        
+        for kare in range(64):
+            satir, sutun = divmod(kare, 8)
+            
+            # Satır maskesi
+            for s in range(8):
+                self.satir_maske[kare] |= 1 << (satir * 8 + s)
+                
+            # Sütun maskesi
+            for r in range(8):
+                self.sutun_maske[kare] |= 1 << (r * 8 + sutun)
+                
+            # Ana köşegen maskesi
+            r, s = satir, sutun
+            while r >= 0 and s >= 0:
+                self.ana_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r -= 1
+                s -= 1
+            r, s = satir + 1, sutun + 1
+            while r < 8 and s < 8:
+                self.ana_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r += 1
+                s += 1
+                
+            # Yan köşegen maskesi
+            r, s = satir, sutun
+            while r >= 0 and s < 8:
+                self.yan_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r -= 1
+                s += 1
+            r, s = satir + 1, sutun - 1
+            while r < 8 and s >= 0:
+                self.yan_kosegen_maske[kare] |= 1 << (r * 8 + s)
+                r += 1
+                s -= 1
 
     def tum_hamleleri_uret(self, tahta):
         """Mevcut pozisyon için tüm pseudo-legal hamleleri üret"""
         self.hamleler = []
         renk = 'beyaz' if tahta.beyaz_sira else 'siyah'
         
-        # Şah kontrolü - şah çekilmişse özel durum
-        sah_tehdidinde = tahta.sah_tehdit_altinda_mi(renk)
-
         if renk == 'beyaz':
             self._piyon_hamleleri_uret(tahta, True)
             self._at_hamleleri_uret(tahta, True)
@@ -79,8 +121,6 @@ class HamleUretici:
             self._vezir_hamleleri_uret(tahta, False)
             self._sah_hamleleri_uret(tahta, False)
 
-        # NOT: Legal hamle filtrelemesi LegalHamleBulucu sınıfında yapılacak
-        # Bu sınıf sadece pseudo-legal hamleleri üretir
         return self.hamleler
 
     def saldiri_altinda_mi(self, tahta, kare, beyaz_saldiri):
@@ -98,7 +138,7 @@ class HamleUretici:
             # Şah saldırıları
             if self.sah_hamle_maskeleri[kare] & tahta.beyaz_sah:
                 return True
-
+                
             # Çizgisel saldırılar (kale, vezir)
             if self._cizgisel_saldiri_kontrol(tahta, kare, tahta.beyaz_kale | tahta.beyaz_vezir):
                 return True
@@ -412,3 +452,141 @@ class HamleUretici:
                        not self.saldiri_altinda_mi(tahta, 59, True) and \
                        not self.saldiri_altinda_mi(tahta, 58, True):
                         self.hamleler.append((60, 58, 'sah', 'uzun_rok'))
+
+    def kareye_saldirilar(self, tahta, kare, saldiran_renk):
+        """Belirtilen kareye hangi taşların saldırdığını bul"""
+        saldiran_taslar = []
+        
+        if saldiran_renk == 'beyaz':
+            # Beyaz piyon saldırıları
+            piyon_saldiri_kaynaklari = []
+            satir, sutun = divmod(kare, 8)
+            if satir > 0:  # Beyaz piyonlar yukarıdan saldırır
+                if sutun > 0 and tahta.beyaz_piyon & (1 << ((satir-1)*8 + sutun-1)):
+                    piyon_saldiri_kaynaklari.append((satir-1)*8 + sutun-1)
+                if sutun < 7 and tahta.beyaz_piyon & (1 << ((satir-1)*8 + sutun+1)):
+                    piyon_saldiri_kaynaklari.append((satir-1)*8 + sutun+1)
+            saldiran_taslar.extend([('piyon', k) for k in piyon_saldiri_kaynaklari])
+            
+            # Beyaz at saldırıları
+            at_kaynaklari = []
+            muhtemel_atlar = self.at_hamle_maskeleri[kare] & tahta.beyaz_at
+            while muhtemel_atlar:
+                kaynak = (muhtemel_atlar & -muhtemel_atlar).bit_length() - 1
+                at_kaynaklari.append(kaynak)
+                muhtemel_atlar &= muhtemel_atlar - 1
+            saldiran_taslar.extend([('at', k) for k in at_kaynaklari])
+            
+            # Beyaz fil saldırıları
+            fil_kaynaklari = self._kosegen_saldiri_kaynaklari(tahta, kare, tahta.beyaz_fil)
+            saldiran_taslar.extend([('fil', k) for k in fil_kaynaklari])
+            
+            # Beyaz kale saldırıları
+            kale_kaynaklari = self._duz_saldiri_kaynaklari(tahta, kare, tahta.beyaz_kale)
+            saldiran_taslar.extend([('kale', k) for k in kale_kaynaklari])
+            
+            # Beyaz vezir saldırıları
+            vezir_kaynaklari = self._kosegen_saldiri_kaynaklari(tahta, kare, tahta.beyaz_vezir)
+            vezir_kaynaklari.extend(self._duz_saldiri_kaynaklari(tahta, kare, tahta.beyaz_vezir))
+            saldiran_taslar.extend([('vezir', k) for k in vezir_kaynaklari])
+            
+            # Beyaz şah saldırıları
+            sah_kaynaklari = []
+            muhtemel_sah = self.sah_hamle_maskeleri[kare] & tahta.beyaz_sah
+            if muhtemel_sah:
+                kaynak = (muhtemel_sah & -muhtemel_sah).bit_length() - 1
+                sah_kaynaklari.append(kaynak)
+            saldiran_taslar.extend([('sah', k) for k in sah_kaynaklari])
+            
+        else:  # Siyah saldırıları
+            # Siyah piyon saldırıları
+            piyon_saldiri_kaynaklari = []
+            satir, sutun = divmod(kare, 8)
+            if satir < 7:  # Siyah piyonlar aşağıdan saldırır
+                if sutun > 0 and tahta.siyah_piyon & (1 << ((satir+1)*8 + sutun-1)):
+                    piyon_saldiri_kaynaklari.append((satir+1)*8 + sutun-1)
+                if sutun < 7 and tahta.siyah_piyon & (1 << ((satir+1)*8 + sutun+1)):
+                    piyon_saldiri_kaynaklari.append((satir+1)*8 + sutun+1)
+            saldiran_taslar.extend([('piyon', k) for k in piyon_saldiri_kaynaklari])
+            
+            # Siyah at saldırıları
+            at_kaynaklari = []
+            muhtemel_atlar = self.at_hamle_maskeleri[kare] & tahta.siyah_at
+            while muhtemel_atlar:
+                kaynak = (muhtemel_atlar & -muhtemel_atlar).bit_length() - 1
+                at_kaynaklari.append(kaynak)
+                muhtemel_atlar &= muhtemel_atlar - 1
+            saldiran_taslar.extend([('at', k) for k in at_kaynaklari])
+            
+            # Siyah fil saldırıları
+            fil_kaynaklari = self._kosegen_saldiri_kaynaklari(tahta, kare, tahta.siyah_fil)
+            saldiran_taslar.extend([('fil', k) for k in fil_kaynaklari])
+            
+            # Siyah kale saldırıları
+            kale_kaynaklari = self._duz_saldiri_kaynaklari(tahta, kare, tahta.siyah_kale)
+            saldiran_taslar.extend([('kale', k) for k in kale_kaynaklari])
+            
+            # Siyah vezir saldırıları
+            vezir_kaynaklari = self._kosegen_saldiri_kaynaklari(tahta, kare, tahta.siyah_vezir)
+            vezir_kaynaklari.extend(self._duz_saldiri_kaynaklari(tahta, kare, tahta.siyah_vezir))
+            saldiran_taslar.extend([('vezir', k) for k in vezir_kaynaklari])
+            
+            # Siyah şah saldırıları
+            sah_kaynaklari = []
+            muhtemel_sah = self.sah_hamle_maskeleri[kare] & tahta.siyah_sah
+            if muhtemel_sah:
+                kaynak = (muhtemel_sah & -muhtemel_sah).bit_length() - 1
+                sah_kaynaklari.append(kaynak)
+            saldiran_taslar.extend([('sah', k) for k in sah_kaynaklari])
+            
+        return saldiran_taslar
+        
+    def _kosegen_saldiri_kaynaklari(self, tahta, hedef, tas_bitboard):
+        """Köşegen saldırı yapan taşların kaynaklarını bul"""
+        kaynak_kareler = []
+        tum_taslar = tahta.tum_taslar
+        
+        # 4 köşegen yön kontrol et
+        yonler = [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+        hedef_satir, hedef_sutun = divmod(hedef, 8)
+        
+        for dy, dx in yonler:
+            satir, sutun = hedef_satir + dy, hedef_sutun + dx
+            
+            while 0 <= satir < 8 and 0 <= sutun < 8:
+                kare = satir * 8 + sutun
+                
+                if tum_taslar & (1 << kare):
+                    if tas_bitboard & (1 << kare):
+                        kaynak_kareler.append(kare)
+                    break
+                    
+                satir += dy
+                sutun += dx
+                
+        return kaynak_kareler
+        
+    def _duz_saldiri_kaynaklari(self, tahta, hedef, tas_bitboard):
+        """Düz çizgide saldırı yapan taşların kaynaklarını bul"""
+        kaynak_kareler = []
+        tum_taslar = tahta.tum_taslar
+        
+        # 4 düz yön kontrol et
+        yonler = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        hedef_satir, hedef_sutun = divmod(hedef, 8)
+        
+        for dy, dx in yonler:
+            satir, sutun = hedef_satir + dy, hedef_sutun + dx
+            
+            while 0 <= satir < 8 and 0 <= sutun < 8:
+                kare = satir * 8 + sutun
+                
+                if tum_taslar & (1 << kare):
+                    if tas_bitboard & (1 << kare):
+                        kaynak_kareler.append(kare)
+                    break
+                    
+                satir += dy
+                sutun += dx
+                
+        return kaynak_kareler

@@ -39,7 +39,7 @@ class SatrancGUI:
 
         # Oyun durumu
         self.tahta = Tahta()
-        self.arama = Arama(derinlik=4)
+        self.arama = Arama(derinlik=5, tt_boyut_mb=256)  # Derinlik 5, 256MB transposition table
         self.secili_kare = None
         self.mumkun_hamleler = []
         self.oyun_bitti = False
@@ -645,8 +645,8 @@ class SatrancGUI:
                 print("Motor için hamle bulunamadı!")
                 return
 
-            # Arama ile en iyi hamleyi bul
-            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta)
+            # Arama ile en iyi hamleyi bul (3 saniye zaman limiti)
+            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta, zaman_limiti=3.0)
             
             if en_iyi_hamle:
                 # Hamleyi yap
@@ -657,6 +657,7 @@ class SatrancGUI:
                     # Arama istatistiklerini güncelle
                     istatistikler = self.arama.get_istatistikler()
                     self.dugum_sayisi = istatistikler['dugum_sayisi']
+                    print(f"Düğüm sayısı: {self.dugum_sayisi}, TT Hit: {istatistikler['tt_hit']}, Prune: {istatistikler['prune_sayisi']}")
                     
                     # Pozisyonu değerlendir (beyaz perspektifinden)
                     from Degerlendirme import Degerlendirici
