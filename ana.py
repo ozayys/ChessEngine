@@ -51,6 +51,14 @@ class SatrancGUI:
         self.terfi_hamle = None
         self.terfi_secenekleri = ['vezir', 'kale', 'fil', 'at']
         
+        # Terfi menüsü animasyon ve hover efektleri
+        self.terfi_menu_alpha = 0
+        self.terfi_menu_animasyon = False
+        self.hover_tas = None
+        self.hover_scale = {}
+        for tas in self.terfi_secenekleri:
+            self.hover_scale[tas] = 1.0
+        
         # Değerlendirme bilgileri
         self.son_degerlendirme = 0
         self.dugum_sayisi = 0
@@ -202,51 +210,156 @@ class SatrancGUI:
         if not self.terfi_bekliyor:
             return
         
-        # Yarı saydam arka plan
+        # Terfi olan piyonu vurgula
+        if self.terfi_kare is not None:
+            satir = self.terfi_kare // 8
+            sutun = self.terfi_kare % 8
+            x = sutun * self.KARE_BOYUTU
+            y = satir * self.KARE_BOYUTU
+            
+            # Parlayan efekt için animasyon
+            pulse = abs(pygame.time.get_ticks() % 1000 - 500) / 500.0
+            highlight_alpha = int(100 + 100 * pulse)
+            
+            highlight_surface = pygame.Surface((self.KARE_BOYUTU, self.KARE_BOYUTU))
+            highlight_surface.set_alpha(highlight_alpha)
+            highlight_surface.fill((255, 215, 0))  # Altın rengi
+            self.ekran.blit(highlight_surface, (x, y))
+            
+            # Çerçeve
+            pygame.draw.rect(self.ekran, (255, 215, 0), 
+                           pygame.Rect(x, y, self.KARE_BOYUTU, self.KARE_BOYUTU), 3)
+        
+        # Animasyon güncelle
+        if self.terfi_menu_animasyon:
+            if self.terfi_menu_alpha < 255:
+                self.terfi_menu_alpha = min(255, self.terfi_menu_alpha + 15)
+        
+        # Yarı saydam arka plan (animasyonlu)
         overlay = pygame.Surface((self.EKRAN_GENISLIGI, self.EKRAN_YUKSEKLIGI))
-        overlay.set_alpha(200)
+        overlay.set_alpha(min(200, self.terfi_menu_alpha))
         overlay.fill((0, 0, 0))
         self.ekran.blit(overlay, (0, 0))
         
-        # Menü arka planı
-        menu_genislik = 320
-        menu_yukseklik = 100
+        # Menü arka planı - daha geniş ve modern
+        menu_genislik = 400
+        menu_yukseklik = 140
         menu_x = (self.TAHTA_BOYUTU - menu_genislik) // 2
         menu_y = (self.TAHTA_BOYUTU - menu_yukseklik) // 2
         
-        menu_rect = pygame.Rect(menu_x, menu_y, menu_genislik, menu_yukseklik)
-        pygame.draw.rect(self.ekran, (50, 50, 50), menu_rect)
-        pygame.draw.rect(self.ekran, (200, 200, 200), menu_rect, 3)
+        # Gölge efekti
+        golge_rect = pygame.Rect(menu_x + 5, menu_y + 5, menu_genislik, menu_yukseklik)
+        golge_surface = pygame.Surface((menu_genislik, menu_yukseklik))
+        golge_surface.set_alpha(100)
+        golge_surface.fill((0, 0, 0))
+        self.ekran.blit(golge_surface, (menu_x + 5, menu_y + 5))
         
-        # Başlık
-        baslik_text = self.font.render("Terfi Seçimi", True, (255, 255, 255))
-        baslik_rect = baslik_text.get_rect(center=(menu_x + menu_genislik // 2, menu_y - 30))
+        # Ana menü arka planı (gradient efekti simülasyonu)
+        menu_rect = pygame.Rect(menu_x, menu_y, menu_genislik, menu_yukseklik)
+        pygame.draw.rect(self.ekran, (40, 40, 45), menu_rect, border_radius=15)
+        pygame.draw.rect(self.ekran, (70, 70, 75), menu_rect, 3, border_radius=15)
+        
+        # İç çerçeve (ışık efekti)
+        ic_rect = pygame.Rect(menu_x + 5, menu_y + 5, menu_genislik - 10, menu_yukseklik - 10)
+        pygame.draw.rect(self.ekran, (60, 60, 65), ic_rect, 1, border_radius=12)
+        
+        # Başlık - daha büyük ve gösterişli
+        baslik_font = pygame.font.Font(None, 42)
+        baslik_text = baslik_font.render("Piyon Terfisi", True, (255, 255, 255))
+        baslik_rect = baslik_text.get_rect(center=(menu_x + menu_genislik // 2, menu_y - 35))
+        
+        # Başlık gölgesi
+        baslik_golge = baslik_font.render("Piyon Terfisi", True, (50, 50, 50))
+        golge_rect = baslik_golge.get_rect(center=(menu_x + menu_genislik // 2 + 2, menu_y - 33))
+        self.ekran.blit(baslik_golge, golge_rect)
         self.ekran.blit(baslik_text, baslik_rect)
         
+        # Alt başlık
+        alt_baslik_font = pygame.font.Font(None, 20)
+        alt_baslik_text = alt_baslik_font.render("Bir taş seçin", True, (180, 180, 180))
+        alt_baslik_rect = alt_baslik_text.get_rect(center=(menu_x + menu_genislik // 2, menu_y - 10))
+        self.ekran.blit(alt_baslik_text, alt_baslik_rect)
+        
+        # Klavye kısayolları bilgisi
+        kisayol_font = pygame.font.Font(None, 16)
+        kisayol_text = kisayol_font.render("Q-Vezir  R-Kale  B-Fil  N-At  (veya 1-2-3-4)", True, (150, 150, 150))
+        kisayol_rect = kisayol_text.get_rect(center=(menu_x + menu_genislik // 2, menu_y + menu_yukseklik + 20))
+        self.ekran.blit(kisayol_text, kisayol_rect)
+        
         # Taş seçenekleri
-        tas_boyut = 70
-        tas_aralik = 10
+        tas_boyut = 80
+        tas_aralik = 15
         toplam_genislik = 4 * tas_boyut + 3 * tas_aralik
         baslangic_x = menu_x + (menu_genislik - toplam_genislik) // 2
         
         renk = 'beyaz' if self.tahta.beyaz_sira else 'siyah'
+        mouse_pos = pygame.mouse.get_pos()
         
         for i, tas_turu in enumerate(self.terfi_secenekleri):
             x = baslangic_x + i * (tas_boyut + tas_aralik)
-            y = menu_y + 15
+            y = menu_y + 30
             
-            # Seçenek kutusu
+            # Hover efekti için scale güncelle
             secenek_rect = pygame.Rect(x, y, tas_boyut, tas_boyut)
-            pygame.draw.rect(self.ekran, (100, 100, 100), secenek_rect)
-            pygame.draw.rect(self.ekran, (255, 255, 255), secenek_rect, 2)
+            if secenek_rect.collidepoint(mouse_pos):
+                if self.hover_scale[tas_turu] < 1.15:
+                    self.hover_scale[tas_turu] = min(1.15, self.hover_scale[tas_turu] + 0.05)
+                self.hover_tas = tas_turu
+            else:
+                if self.hover_scale[tas_turu] > 1.0:
+                    self.hover_scale[tas_turu] = max(1.0, self.hover_scale[tas_turu] - 0.05)
+            
+            # Seçenek kutusu - hover ile değişen renk
+            scale = self.hover_scale[tas_turu]
+            boyut = int(tas_boyut * scale)
+            x_offset = (boyut - tas_boyut) // 2
+            y_offset = (boyut - tas_boyut) // 2
+            
+            kutucuk_rect = pygame.Rect(x - x_offset, y - y_offset, boyut, boyut)
+            
+            # Arka plan rengi (hover'da parlak)
+            if self.hover_tas == tas_turu and kutucuk_rect.collidepoint(mouse_pos):
+                bg_color = (80, 80, 90)
+                border_color = (255, 215, 0)  # Altın rengi
+                border_width = 4
+            else:
+                bg_color = (60, 60, 65)
+                border_color = (150, 150, 150)
+                border_width = 2
+            
+            # Kutucuk çiz
+            pygame.draw.rect(self.ekran, bg_color, kutucuk_rect, border_radius=10)
+            pygame.draw.rect(self.ekran, border_color, kutucuk_rect, border_width, border_radius=10)
+            
+            # İç ışık efekti
+            ic_kutucuk = pygame.Rect(kutucuk_rect.x + 3, kutucuk_rect.y + 3, 
+                                    kutucuk_rect.width - 6, kutucuk_rect.height - 6)
+            pygame.draw.rect(self.ekran, (90, 90, 95), ic_kutucuk, 1, border_radius=8)
             
             # Taş resmi
             if (renk, tas_turu) in self.tas_resimleri:
                 resim = self.tas_resimleri[(renk, tas_turu)]
-                # Menü için yeniden boyutlandır
-                resim = pygame.transform.scale(resim, (tas_boyut - 10, tas_boyut - 10))
-                resim_rect = resim.get_rect(center=(x + tas_boyut // 2, y + tas_boyut // 2))
+                # Hover'da büyüt
+                resim_boyut = int((boyut - 20) * 0.9)
+                resim = pygame.transform.scale(resim, (resim_boyut, resim_boyut))
+                resim_rect = resim.get_rect(center=kutucuk_rect.center)
                 self.ekran.blit(resim, resim_rect)
+            
+            # Taş ismi ve kısayol (hover'da göster)
+            if self.hover_tas == tas_turu and kutucuk_rect.collidepoint(mouse_pos):
+                isim_font = pygame.font.Font(None, 18)
+                kisayol_map = {'vezir': 'Q/1', 'kale': 'R/2', 'fil': 'B/3', 'at': 'N/4'}
+                isim_text = isim_font.render(f"{tas_turu.capitalize()} ({kisayol_map[tas_turu]})", True, (255, 255, 255))
+                isim_rect = isim_text.get_rect(center=(kutucuk_rect.centerx, kutucuk_rect.bottom + 15))
+                self.ekran.blit(isim_text, isim_rect)
+            
+            # Küçük kısayol göstergesi
+            else:
+                kisayol_font = pygame.font.Font(None, 14)
+                kisayol_map = {'vezir': '1', 'kale': '2', 'fil': '3', 'at': '4'}
+                kisayol_text = kisayol_font.render(kisayol_map[tas_turu], True, (120, 120, 120))
+                kisayol_rect = kisayol_text.get_rect(center=(kutucuk_rect.centerx, kutucuk_rect.bottom + 8))
+                self.ekran.blit(kisayol_text, kisayol_rect)
             
             # Hover efekti için rect'i sakla
             setattr(self, f'terfi_{tas_turu}_rect', secenek_rect)
@@ -262,6 +375,25 @@ class SatrancGUI:
                 return tas_turu
         
         return None
+    
+    def terfi_klavye_secimi(self, key):
+        """Klavye ile terfi seçimi"""
+        if not self.terfi_bekliyor:
+            return None
+        
+        # Q: Vezir, R: Kale, B: Fil, N: At
+        klavye_map = {
+            pygame.K_q: 'vezir',
+            pygame.K_r: 'kale',
+            pygame.K_b: 'fil',
+            pygame.K_n: 'at',
+            pygame.K_1: 'vezir',
+            pygame.K_2: 'kale',
+            pygame.K_3: 'fil',
+            pygame.K_4: 'at'
+        }
+        
+        return klavye_map.get(key, None)
 
     def panel_ciz(self):
         """Sağ paneli çiz"""
@@ -434,6 +566,8 @@ class SatrancGUI:
                     self.terfi_bekliyor = True
                     self.terfi_kare = hedef
                     self.terfi_hamle = hamle
+                    self.terfi_menu_animasyon = True
+                    self.terfi_menu_alpha = 0
                     return False  # Henüz hamle yapma, terfi seçimi bekle
                 
                 try:
@@ -479,6 +613,11 @@ class SatrancGUI:
                 self.terfi_bekliyor = False
                 self.terfi_kare = None
                 self.terfi_hamle = None
+                self.terfi_menu_animasyon = False
+                self.terfi_menu_alpha = 0
+                self.hover_tas = None
+                for tas in self.terfi_secenekleri:
+                    self.hover_scale[tas] = 1.0
                 
                 return True
         except Exception as e:
@@ -562,6 +701,11 @@ class SatrancGUI:
         self.terfi_bekliyor = False
         self.terfi_kare = None
         self.terfi_hamle = None
+        self.terfi_menu_animasyon = False
+        self.terfi_menu_alpha = 0
+        self.hover_tas = None
+        for tas in self.terfi_secenekleri:
+            self.hover_scale[tas] = 1.0
         
         # Değerlendirme bilgilerini sıfırla
         self.son_degerlendirme = 0
@@ -588,9 +732,25 @@ class SatrancGUI:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
-                    elif event.key == pygame.K_r:
+                    elif event.key == pygame.K_r and not self.terfi_bekliyor:
                         self.yeniden_baslat()
-                    elif pygame.K_1 <= event.key <= pygame.K_9:
+                    elif self.terfi_bekliyor:
+                        # Terfi seçimi için klavye kısayolları
+                        terfi_secimi = self.terfi_klavye_secimi(event.key)
+                        if terfi_secimi:
+                            if self.terfi_hamlesini_yap(terfi_secimi):
+                                self.secili_kare = None
+                                self.mumkun_hamleler = []
+                                
+                                # Oyun bitti mi kontrol et
+                                if self.tahta.oyun_bitti_mi():
+                                    self.oyun_bitti = True
+                                    continue
+                                
+                                # Motor sırası başlat
+                                if not self.tahta.beyaz_sira:
+                                    pygame.time.set_timer(pygame.USEREVENT + 1, 500)
+                    elif pygame.K_1 <= event.key <= pygame.K_9 and not self.terfi_bekliyor:
                         yeni_derinlik = event.key - pygame.K_0
                         self.arama.derinlik_degistir(yeni_derinlik)
 
