@@ -39,11 +39,30 @@ class SatrancGUI:
 
         # Oyun durumu
         self.tahta = Tahta()
-        self.arama = Arama(derinlik=3)
+        
+        # Arama motoru seçimi (G tuşu ile değiştirilebilir)
+        self.gelismis_motor = True
+        try:
+            from GelismisArama import GelismisArama
+            self.gelismis_arama = GelismisArama(derinlik=4)
+        except ImportError:
+            self.gelismis_motor = False
+            
+        from Arama import Arama
+        self.basit_arama = Arama(derinlik=3)
+        
+        # Mat/Pat kontrolcüsü
+        try:
+            from MatKontrol import MatPatKontrolcu
+            self.mat_kontrolcu = MatPatKontrolcu()
+        except ImportError:
+            self.mat_kontrolcu = None
+        
         self.secili_kare = None
         self.mumkun_hamleler = []
         self.oyun_bitti = False
         self.motor_dusunuyor = False
+        self.oyun_sonucu = None
         
         # Değerlendirme bilgileri
         self.son_degerlendirme = 0
@@ -199,16 +218,29 @@ class SatrancGUI:
         y_offset = 20
 
         # Oyun durumu
-        sira_text = "Beyaz Sıra" if self.tahta.beyaz_sira else "Siyah Sıra"
-        if self.motor_dusunuyor:
+        if self.oyun_bitti and self.oyun_sonucu:
+            sira_text = self.oyun_sonucu
+            renk = (255, 215, 0)  # Altın rengi
+        elif self.motor_dusunuyor:
             sira_text = "Motor Düşünüyor..."
+            renk = (255, 165, 0)  # Turuncu
+        else:
+            sira_text = "Beyaz Sıra" if self.tahta.beyaz_sira else "Siyah Sıra"
+            renk = self.YAZI_RENK
 
-        text = self.font.render(sira_text, True, self.YAZI_RENK)
+        text = self.font.render(sira_text, True, renk)
         self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
-        y_offset += 50
+        y_offset += 40
+        
+        # Motor türü
+        motor_text = "Gelişmiş Motor" if self.gelismis_motor else "Basit Motor"
+        text = self.kucuk_font.render(motor_text, True, self.YAZI_RENK)
+        self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+        y_offset += 25
 
         # Arama derinliği
-        derinlik_text = f"Derinlik: {self.arama.derinlik}"
+        current_depth = self.gelismis_arama.derinlik if self.gelismis_motor else self.basit_arama.derinlik
+        derinlik_text = f"Derinlik: {current_depth}"
         text = self.kucuk_font.render(derinlik_text, True, self.YAZI_RENK)
         self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
         y_offset += 30
@@ -254,6 +286,7 @@ class SatrancGUI:
             "R - Yeniden Başlat",
             "ESC - Çıkış",
             "1-9 - Derinlik",
+            "G - Motor Değiştir",
             "",
             "Beyaz: İnsan",
             "Siyah: Motor"
@@ -268,6 +301,12 @@ class SatrancGUI:
         """Kare seçimini işle"""
         if self.motor_dusunuyor or self.oyun_bitti:
             return
+
+        # Mat/Pat kontrolü
+        if self.mat_kontrolcu and not self.oyun_bitti:
+            self._oyun_durumu_kontrol()
+            if self.oyun_bitti:
+                return
 
         # Sadece beyaz sırasında insan oynayabilir
         if not self.tahta.beyaz_sira:
@@ -328,6 +367,10 @@ class SatrancGUI:
                         raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
                         self.son_degerlendirme = raw_skor / 100.0
                         
+                        # Hamle sonrası oyun durumu kontrolü
+                        if self.mat_kontrolcu:
+                            self._oyun_durumu_kontrol()
+                        
                         return True
                     return False
                 except Exception as e:
@@ -355,17 +398,22 @@ class SatrancGUI:
                 return
 
             # Arama ile en iyi hamleyi bul
-            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta)
+            if self.gelismis_motor:
+                en_iyi_hamle = self.gelismis_arama.en_iyi_hamle_bul(self.tahta, max_time=5.0)
+                # İstatistikleri güncelle
+                istatistikler = self.gelismis_arama.get_istatistikler()
+                self.dugum_sayisi = istatistikler['dugum_sayisi']
+            else:
+                en_iyi_hamle = self.basit_arama.en_iyi_hamle_bul(self.tahta)
+                # İstatistikleri güncelle
+                istatistikler = self.basit_arama.get_istatistikler()
+                self.dugum_sayisi = istatistikler['dugum_sayisi']
             
             if en_iyi_hamle:
                 # Hamleyi yap
                 if self.tahta.hamle_yap(en_iyi_hamle):
                     print(f"Motor hamle yaptı: {en_iyi_hamle}")
                     self.son_hamle = en_iyi_hamle
-                    
-                    # Arama istatistiklerini güncelle
-                    istatistikler = self.arama.get_istatistikler()
-                    self.dugum_sayisi = istatistikler['dugum_sayisi']
                     
                     # Pozisyonu değerlendir (beyaz perspektifinden)
                     from Degerlendirme import Degerlendirici
@@ -389,6 +437,10 @@ class SatrancGUI:
 
         finally:
             self.motor_dusunuyor = False
+            
+            # Hamle sonrası oyun durumu kontrolü
+            if self.mat_kontrolcu:
+                self._oyun_durumu_kontrol()
 
     def yeniden_baslat(self):
         """Oyunu yeniden başlat"""
@@ -402,8 +454,29 @@ class SatrancGUI:
         self.son_degerlendirme = 0
         self.dugum_sayisi = 0
         self.son_hamle = None
+        self.oyun_sonucu = None
         
         pygame.time.set_timer(pygame.USEREVENT + 1, 0)  # Timer'ı iptal et
+
+    def _oyun_durumu_kontrol(self):
+        """Oyun durumunu kontrol et (mat/pat)"""
+        if not self.mat_kontrolcu:
+            return
+            
+        durum = self.mat_kontrolcu.oyun_durumu_kontrol(self.tahta)
+        
+        if durum == 'mat_beyaz':
+            self.oyun_bitti = True
+            self.oyun_sonucu = "Beyaz Kazandı! (Mat)"
+            print("Beyaz kazandı - Mat!")
+        elif durum == 'mat_siyah':
+            self.oyun_bitti = True
+            self.oyun_sonucu = "Siyah Kazandı! (Mat)"
+            print("Siyah kazandı - Mat!")
+        elif durum == 'pat':
+            self.oyun_bitti = True
+            self.oyun_sonucu = "Berabere! (Pat)"
+            print("Berabere - Pat!")
 
     def calistir(self):
         """Ana oyun döngüsü"""
@@ -425,9 +498,20 @@ class SatrancGUI:
                         running = False
                     elif event.key == pygame.K_r:
                         self.yeniden_baslat()
+                    elif event.key == pygame.K_g:
+                        # Motor değiştir
+                        if self.gelismis_motor:
+                            self.gelismis_motor = False
+                            print("Basit motor seçildi")
+                        else:
+                            self.gelismis_motor = True
+                            print("Gelişmiş motor seçildi")
                     elif pygame.K_1 <= event.key <= pygame.K_9:
                         yeni_derinlik = event.key - pygame.K_0
-                        self.arama.derinlik_degistir(yeni_derinlik)
+                        if self.gelismis_motor:
+                            self.gelismis_arama.derinlik_degistir(yeni_derinlik)
+                        else:
+                            self.basit_arama.derinlik_degistir(yeni_derinlik)
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Sol tık
