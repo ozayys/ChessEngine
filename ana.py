@@ -349,14 +349,33 @@ class SatrancGUI:
     def kare_icin_hamleler_bul(self, kaynak_kare):
         """Belirli bir kare için mümkün hamleleri bul"""
         try:
-            from HamleUret import HamleUretici
-            uretici = HamleUretici()
-            tum_hamleler = uretici.tum_hamleleri_uret(self.tahta)
+            # Şah altında mı kontrol et
+            if self.mat_kontrolcu and self.mat_kontrolcu.sah_tehdidinde_mi(self.tahta, self.tahta.beyaz_sira):
+                # Şah altında - sadece şahı kurtaran hamleler
+                legal_hamleler = self.mat_kontrolcu.sah_altinda_legal_hamleler(self.tahta)
+                kare_hamleleri = [hamle for hamle in legal_hamleler if hamle[0] == kaynak_kare]
+                print(f"ŞAH ALTINDA! Kare {kaynak_kare} için {len(kare_hamleleri)} legal hamle")
+                return kare_hamleleri
+            else:
+                # Normal durum
+                from HamleUret import HamleUretici
+                uretici = HamleUretici()
+                tum_hamleler = uretici.tum_hamleleri_uret(self.tahta)
 
-            # Sadece bu kareden başlayan hamleleri filtrele
-            kare_hamleleri = [hamle for hamle in tum_hamleler if hamle[0] == kaynak_kare]
-            return kare_hamleleri
+                # Legal hamle kontrolü yap
+                legal_hamleler = []
+                for hamle in tum_hamleler:
+                    if hamle[0] == kaynak_kare:
+                        # Bu hamle legal mi kontrol et
+                        tahta_test = self.tahta.kopyala()
+                        if tahta_test.hamle_yap(hamle):
+                            # Hamle sonrası kendi şahımız tehdit altında mı?
+                            if not self.mat_kontrolcu.sah_tehdidinde_mi(tahta_test, not tahta_test.beyaz_sira):
+                                legal_hamleler.append(hamle)
+
+                return legal_hamleler
         except Exception as e:
+            print(f"Hamle bulma hatası: {e}")
             return []
 
     def hamle_dene(self, kaynak, hedef):

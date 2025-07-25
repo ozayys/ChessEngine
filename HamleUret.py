@@ -76,7 +76,19 @@ class HamleUretici:
             self._vezir_hamleleri_uret(tahta, False)
             self._sah_hamleleri_uret(tahta, False)
 
-        return self.hamleler
+        # ÖNEMLİ: Şah alma hamlelerini filtrele - şah yenmez!
+        filtered_hamleler = []
+        for hamle in self.hamleler:
+            hedef_kare = hamle[1]
+            hedef_tas = tahta.tas_turu_al(hedef_kare)
+            
+            # Eğer hedef taş şah ise bu hamleyi ekleme!
+            if hedef_tas and hedef_tas[1] == 'sah':
+                continue  # Şah alma hamlesi - atla!
+            
+            filtered_hamleler.append(hamle)
+
+        return filtered_hamleler
 
     def saldiri_altinda_mi(self, tahta, kare, beyaz_saldiri):
         """Belirtilen kare saldırı altında mı kontrol et"""

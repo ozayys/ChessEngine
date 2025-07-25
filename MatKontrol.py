@@ -15,15 +15,6 @@ class MatPatKontrolcu:
         Oyun durumunu kontrol et
         Returns: 'devam', 'mat_beyaz', 'mat_siyah', 'pat'
         """
-        # ÖNEMLİ: Önce şahların tahtada olup olmadığını kontrol et!
-        beyaz_sah_var = tahta.bit_sayisi(tahta.beyaz_sah) > 0
-        siyah_sah_var = tahta.bit_sayisi(tahta.siyah_sah) > 0
-        
-        if not beyaz_sah_var:
-            return 'mat_siyah'  # Beyaz şah alındı = Siyah kazandı
-        if not siyah_sah_var:
-            return 'mat_beyaz'  # Siyah şah alındı = Beyaz kazandı
-        
         legal_hamleler = self._legal_hamleleri_bul(tahta)
         
         if len(legal_hamleler) == 0:
@@ -117,3 +108,27 @@ class MatPatKontrolcu:
                      tahta.bit_sayisi(tahta.siyah_vezir))
         
         return toplam_tas == 0  # Sadece şahlar kaldı
+    
+    def sah_altinda_legal_hamleler(self, tahta):
+        """Şah altındayken legal hamleleri bul"""
+        if not self.sah_tehdidinde_mi(tahta, tahta.beyaz_sira):
+            # Şah altında değilse normal hamleler
+            return self._legal_hamleleri_bul(tahta)
+        
+        print(f"ŞAH! {'Beyaz' if tahta.beyaz_sira else 'Siyah'} şah altında")
+        
+        # Şah altında - sadece şahı kurtaran hamleler legal
+        legal_hamleler = []
+        pseudo_legal = self.hamle_uretici.tum_hamleleri_uret(tahta)
+        
+        for hamle in pseudo_legal:
+            # Hamleyi geçici yap
+            tahta_test = tahta.kopyala()
+            if tahta_test.hamle_yap(hamle):
+                # Hamle sonrası hala şah altında mı?
+                if not self.sah_tehdidinde_mi(tahta_test, not tahta_test.beyaz_sira):
+                    legal_hamleler.append(hamle)
+                    print(f"Legal şah kurtarma hamlesi: {hamle}")
+        
+        print(f"Şah altında {len(legal_hamleler)} legal hamle bulundu")
+        return legal_hamleler
