@@ -321,10 +321,12 @@ class SatrancGUI:
                     if self.tahta.hamle_yap(hamle):
                         self.son_hamle = hamle
                         
-                        # Pozisyonu değerlendir
+                        # Pozisyonu değerlendir (beyaz perspektifinden)
                         from Degerlendirme import Degerlendirici
                         degerlendirici = Degerlendirici()
-                        self.son_degerlendirme = degerlendirici.degerlendir(self.tahta) / 100.0
+                        # Değerlendirmeyi beyaz perspektifinden al (pozitif = beyaz iyi, negatif = siyah iyi)
+                        raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                        self.son_degerlendirme = raw_skor / 100.0
                         
                         return True
                     return False
@@ -365,10 +367,12 @@ class SatrancGUI:
                     istatistikler = self.arama.get_istatistikler()
                     self.dugum_sayisi = istatistikler['dugum_sayisi']
                     
-                    # Pozisyonu değerlendir
+                    # Pozisyonu değerlendir (beyaz perspektifinden)
                     from Degerlendirme import Degerlendirici
                     degerlendirici = Degerlendirici()
-                    self.son_degerlendirme = degerlendirici.degerlendir(self.tahta) / 100.0  # Centipawn'dan pawn'a çevir
+                    # Değerlendirmeyi beyaz perspektifinden al (pozitif = beyaz iyi, negatif = siyah iyi)
+                    raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                    self.son_degerlendirme = raw_skor / 100.0  # Centipawn'dan pawn'a çevir
                 else:
                     print("Motor hamle yapamadı!")
             else:
