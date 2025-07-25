@@ -48,6 +48,8 @@ class Arama:
         en_iyi_hamle = None
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
         
+        # TT'yi temizlemeyelim, önceki aramalardaki bilgileri kullanalım
+        
         try:
             # Legal hamleleri al
             hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
@@ -55,10 +57,12 @@ class Arama:
             if not hamleler:
                 return None
                 
-            # Iterative deepening
-            for d in range(1, self.derinlik + 1):
-                # Zaman kontrolü
-                if time.time() - self.arama_baslangic > self.zaman_limiti * 0.4:
+            # Iterative deepening - her derinlik için ayrı arama
+            for current_depth in range(1, self.derinlik + 1):
+                # Zaman kontrolü - toplam sürenin %90'ını kullan
+                gecen_sure = time.time() - self.arama_baslangic
+                if gecen_sure > self.zaman_limiti * 0.9:
+                    print(f"Zaman doldu, derinlik {current_depth-1}'de duruldu")
                     break
                     
                 iterasyon_en_iyi = None
@@ -70,9 +74,16 @@ class Arama:
                 else:
                     hamleler = self.move_ordering.hamleleri_sirala(tahta, hamleler)
                 
+                # Bu derinlik için istatistikleri sıfırla
+                derinlik_oncesi_dugum = self.dugum_sayisi
+                derinlik_baslangic = time.time()
+                
                 for hamle in hamleler:
-                    # Zaman kontrolü
+                    # Hamle bazında zaman kontrolü
                     if time.time() - self.arama_baslangic > self.zaman_limiti:
+                        if iterasyon_en_iyi:  # Bu derinlikte en az bir hamle tamamlandıysa
+                            en_iyi_hamle = iterasyon_en_iyi
+                            en_iyi_skor = iterasyon_skor
                         return en_iyi_hamle or hamleler[0]
                         
                     tahta_kopyasi = tahta.kopyala()
@@ -80,13 +91,17 @@ class Arama:
                     if not tahta_kopyasi.hamle_yap(hamle):
                         continue
                         
+                    # Alpha-beta window
+                    alpha = float('-inf')
+                    beta = float('inf')
+                    
                     if tahta.beyaz_sira:  # Beyaz oynuyor
-                        skor = self.alpha_beta(tahta_kopyasi, d - 1, float('-inf'), float('inf'), False, 0)
+                        skor = self.alpha_beta(tahta_kopyasi, current_depth - 1, alpha, beta, False, 0)
                         if skor > iterasyon_skor:
                             iterasyon_skor = skor
                             iterasyon_en_iyi = hamle
                     else:  # Siyah oynuyor
-                        skor = self.alpha_beta(tahta_kopyasi, d - 1, float('-inf'), float('inf'), True, 0)
+                        skor = self.alpha_beta(tahta_kopyasi, current_depth - 1, alpha, beta, True, 0)
                         if skor < iterasyon_skor:
                             iterasyon_skor = skor
                             iterasyon_en_iyi = hamle
@@ -96,14 +111,26 @@ class Arama:
                     en_iyi_hamle = iterasyon_en_iyi
                     en_iyi_skor = iterasyon_skor
                     
+                    # Debug bilgisi
+                    derinlik_dugum_sayisi = self.dugum_sayisi - derinlik_oncesi_dugum
+                    derinlik_suresi = time.time() - derinlik_baslangic
+                    print(f"Derinlik {current_depth}: {derinlik_dugum_sayisi} düğüm, "
+                          f"süre: {derinlik_suresi:.2f}s, en iyi: {en_iyi_hamle}, skor: {en_iyi_skor}")
+                else:
+                    print(f"Derinlik {current_depth}: Hamle bulunamadı!")
+                    break
+                    
         except Exception as e:
             print(f"Arama hatası: {e}")
+            import traceback
+            traceback.print_exc()
             
         return en_iyi_hamle
 
     def alpha_beta(self, tahta, derinlik, alpha, beta, maksimize_ediyor, ply):
         """Optimize edilmiş Alpha-Beta pruning"""
         self.dugum_sayisi += 1
+        self.max_derinlik = max(self.max_derinlik, ply)  # Ply'ı takip et
         alfa_orijinal = alpha
         
         # Transposition table kontrolü
