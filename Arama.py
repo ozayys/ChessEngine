@@ -7,6 +7,7 @@ Gelecekte iterative deepening ve zaman kontrolü eklenecek.
 from HamleUret import HamleUretici
 from Degerlendirme import Degerlendirici
 import copy
+from LegalHamle import LegalHamleBulucu
 
 
 class Arama:
@@ -14,6 +15,7 @@ class Arama:
         self.derinlik = derinlik
         self.hamle_uretici = HamleUretici()
         self.degerlendirme = Degerlendirici()
+        self.legal_bulucu = LegalHamleBulucu()  # LegalHamleBulucu örneği
         self.dugum_sayisi = 0
         self.max_derinlik = 0
 
@@ -59,7 +61,17 @@ class Arama:
         self.dugum_sayisi += 1
         self.max_derinlik = max(self.max_derinlik, self.derinlik - derinlik)
 
-        # Terminal düğüm kontrolü
+        # Terminal düğüm kontrolü (mat/pat)
+        if self.legal_bulucu.mat_mi(tahta):
+            # Mat olan taraf kaybetti, skor derinliğe göre mate-in-N
+            if tahta.beyaz_sira:
+                # Beyaz mat oldu, siyah kazandı
+                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            else:
+                # Siyah mat oldu, beyaz kazandı
+                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+        if self.legal_bulucu.pat_mi(tahta):
+            return 0  # Pat, beraberlik
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
@@ -103,7 +115,14 @@ class Arama:
         """Basit MiniMax algoritması (Alpha-Beta olmadan)"""
         self.dugum_sayisi += 1
 
-        # Terminal düğüm kontrolü
+        # Terminal düğüm kontrolü (mat/pat)
+        if self.legal_bulucu.mat_mi(tahta):
+            if tahta.beyaz_sira:
+                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            else:
+                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+        if self.legal_bulucu.pat_mi(tahta):
+            return 0
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
