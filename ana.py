@@ -8,6 +8,7 @@ import sys
 from Tahta import Tahta
 from Arama import Arama
 import threading
+from LegalHamle import LegalHamleBulucu
 
 
 class SatrancGUI:
@@ -43,6 +44,7 @@ class SatrancGUI:
         self.mumkun_hamleler = []
         self.oyun_bitti = False
         self.motor_dusunuyor = False
+        self.legal_bulucu = LegalHamleBulucu()
 
         # Taş sembolleri (Unicode)
         self.tas_sembolleri = {
@@ -169,6 +171,21 @@ class SatrancGUI:
         self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
         y_offset += 50
 
+        # Oyun sonu mesajı
+        if self.oyun_bitti:
+            if self.legal_bulucu.mat_mi(self.tahta):
+                if self.tahta.beyaz_sira:
+                    sonuc_text = "Siyah Kazandı (Mat)"
+                else:
+                    sonuc_text = "Beyaz Kazandı (Mat)"
+            elif self.legal_bulucu.pat_mi(self.tahta):
+                sonuc_text = "Beraberlik (Pat)"
+            else:
+                sonuc_text = "Oyun Bitti"
+            text = self.font.render(sonuc_text, True, (255, 0, 0))
+            self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+            y_offset += 50
+
         # Kontroller
         controls = [
             "Kontroller:",
@@ -267,6 +284,9 @@ class SatrancGUI:
                 try:
                     self.tahta.hamle_yap(hamle)
                     print("DEBUG: Hamle başarıyla yapıldı")
+                    # Hamle sonrası oyun sonu kontrolü
+                    if self.legal_bulucu.oyun_bitti_mi(self.tahta):
+                        self.oyun_bitti = True
                     return True
                 except Exception as e:
                     print(f"DEBUG: Hamle yapma hatası: {e}")
@@ -292,6 +312,9 @@ class SatrancGUI:
             if en_iyi_hamle:
                 self.tahta.hamle_yap(en_iyi_hamle)
                 print(f"DEBUG: Motor hamle yaptı: {en_iyi_hamle}")
+                # Hamle sonrası oyun sonu kontrolü
+                if self.legal_bulucu.oyun_bitti_mi(self.tahta):
+                    self.oyun_bitti = True
             else:
                 print("DEBUG: Motor hamle bulamadı")
         except Exception as e:
