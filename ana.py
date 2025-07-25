@@ -418,7 +418,7 @@ class SatrancGUI:
             
             if en_iyi_hamle:
                 # Hamleyi yap
-                                if self.tahta.hamle_yap(en_iyi_hamle):
+                if self.tahta.hamle_yap(en_iyi_hamle):
                     print(f"Motor hamle yaptı: {en_iyi_hamle}")
                     self.son_hamle = en_iyi_hamle
 
