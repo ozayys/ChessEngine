@@ -199,13 +199,36 @@ class SatrancGUI:
         y_offset = 20
 
         # Oyun durumu
-        sira_text = "Beyaz Sıra" if self.tahta.beyaz_sira else "Siyah Sıra"
-        if self.motor_dusunuyor:
-            sira_text = "Motor Düşünüyor..."
+        oyun_durumu, kazanan = self.tahta.oyun_sonu_durumu()
+        
+        if oyun_durumu == 'mat':
+            durum_text = f"MAT! {kazanan.capitalize()} Kazandı"
+            renk = (255, 0, 0)  # Kırmızı
+            font = self.font
+        elif oyun_durumu == 'pat':
+            durum_text = "PAT! Berabere"
+            renk = (255, 255, 0)  # Sarı
+            font = self.font
+        else:
+            sira_text = "Beyaz Sıra" if self.tahta.beyaz_sira else "Siyah Sıra"
+            if self.motor_dusunuyor:
+                sira_text = "Motor Düşünüyor..."
+            durum_text = sira_text
+            renk = self.YAZI_RENK
+            font = self.font
 
-        text = self.font.render(sira_text, True, self.YAZI_RENK)
+        text = font.render(durum_text, True, renk)
         self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
         y_offset += 50
+
+        # Şah kontrolü
+        if not oyun_durumu:  # Oyun devam ediyorsa
+            renk = 'beyaz' if self.tahta.beyaz_sira else 'siyah'
+            if self.tahta.sah_tehdit_altinda_mi(renk):
+                sah_text = "ŞAH!"
+                text = self.font.render(sah_text, True, (255, 100, 100))
+                self.ekran.blit(text, (self.TAHTA_BOYUTU + 10, y_offset))
+                y_offset += 40
 
         # Arama derinliği
         derinlik_text = f"Derinlik: {self.arama.derinlik}"
@@ -263,7 +286,12 @@ class SatrancGUI:
 
     def kare_secimi_isle(self, kare):
         """Kare seçimini işle"""
-        if self.motor_dusunuyor or self.oyun_bitti:
+        if self.motor_dusunuyor:
+            return
+
+        # Oyun bitti mi kontrol et
+        if self.tahta.oyun_bitti_mi():
+            self.oyun_bitti = True
             return
 
         # Sadece beyaz sırasında insan oynayabilir
@@ -276,7 +304,11 @@ class SatrancGUI:
 
             if tas_info and tas_info[0] == 'beyaz':  # Sadece beyaz taşları seçilebilir
                 self.secili_kare = kare
-                self.mumkun_hamleler = self.kare_icin_hamleler_bul(kare)
+                # Legal hamleleri bul
+                from LegalHamle import LegalHamleBulucu
+                legal_bulucu = LegalHamleBulucu()
+                tum_legal_hamleler = legal_bulucu.legal_hamleleri_bul(self.tahta)
+                self.mumkun_hamleler = [hamle for hamle in tum_legal_hamleler if hamle[0] == kare]
         else:
             # Hamle yapmaya çalış
             hamle_yapildi = self.hamle_dene(self.secili_kare, kare)
@@ -284,6 +316,12 @@ class SatrancGUI:
             if hamle_yapildi:
                 self.secili_kare = None
                 self.mumkun_hamleler = []
+                
+                # Oyun bitti mi kontrol et
+                if self.tahta.oyun_bitti_mi():
+                    self.oyun_bitti = True
+                    return
+                
                 # Motor sırası başlat - sadece siyah sırasıysa
                 if not self.tahta.beyaz_sira:
                     pygame.time.set_timer(pygame.USEREVENT + 1, 500)  # 500ms sonra motor hamlesini başlat
@@ -292,7 +330,11 @@ class SatrancGUI:
                 tas_info = self.tahta.karedeki_tas(kare)
                 if tas_info and tas_info[0] == 'beyaz':
                     self.secili_kare = kare
-                    self.mumkun_hamleler = self.kare_icin_hamleler_bul(kare)
+                    # Legal hamleleri bul
+                    from LegalHamle import LegalHamleBulucu
+                    legal_bulucu = LegalHamleBulucu()
+                    tum_legal_hamleler = legal_bulucu.legal_hamleleri_bul(self.tahta)
+                    self.mumkun_hamleler = [hamle for hamle in tum_legal_hamleler if hamle[0] == kare]
                 else:
                     self.secili_kare = None
                     self.mumkun_hamleler = []
@@ -300,9 +342,9 @@ class SatrancGUI:
     def kare_icin_hamleler_bul(self, kaynak_kare):
         """Belirli bir kare için mümkün hamleleri bul"""
         try:
-            from HamleUret import HamleUretici
-            uretici = HamleUretici()
-            tum_hamleler = uretici.tum_hamleleri_uret(self.tahta)
+            from LegalHamle import LegalHamleBulucu
+            legal_bulucu = LegalHamleBulucu()
+            tum_hamleler = legal_bulucu.legal_hamleleri_bul(self.tahta)
 
             # Sadece bu kareden başlayan hamleleri filtrele
             kare_hamleleri = [hamle for hamle in tum_hamleler if hamle[0] == kaynak_kare]
@@ -343,9 +385,9 @@ class SatrancGUI:
         """Motor hamlesi hesapla (thread fonksiyonu)"""
         try:
             # Önce mevcut hamleleri kontrol et
-            from HamleUret import HamleUretici
-            uretici = HamleUretici()
-            mevcut_hamleler = uretici.tum_hamleleri_uret(self.tahta)
+            from LegalHamle import LegalHamleBulucu
+            legal_bulucu = LegalHamleBulucu()
+            mevcut_hamleler = legal_bulucu.legal_hamleleri_bul(self.tahta)
 
             if not mevcut_hamleler:
                 print("Motor için hamle bulunamadı!")
@@ -370,6 +412,10 @@ class SatrancGUI:
                     # Değerlendirmeyi beyaz perspektifinden al (pozitif = beyaz iyi, negatif = siyah iyi)
                     raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
                     self.son_degerlendirme = raw_skor / 100.0  # Centipawn'dan pawn'a çevir
+                    
+                    # Oyun bitti mi kontrol et
+                    if self.tahta.oyun_bitti_mi():
+                        self.oyun_bitti = True
                 else:
                     print("Motor hamle yapamadı!")
             else:
@@ -380,6 +426,10 @@ class SatrancGUI:
                     print(f"Motor rastgele hamle yaptı: {rastgele_hamle}")
                     self.son_hamle = rastgele_hamle
                     self.son_degerlendirme = 0
+                    
+                    # Oyun bitti mi kontrol et
+                    if self.tahta.oyun_bitti_mi():
+                        self.oyun_bitti = True
 
         except Exception as e:
             print(f"Motor hamle hatası: {e}")

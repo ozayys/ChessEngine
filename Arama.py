@@ -6,6 +6,7 @@ Gelecekte iterative deepening ve zaman kontrolü eklenecek.
 
 from HamleUret import HamleUretici
 from Degerlendirme import Degerlendirici
+from LegalHamle import LegalHamleBulucu
 import copy
 
 
@@ -14,6 +15,7 @@ class Arama:
         self.derinlik = derinlik
         self.hamle_uretici = HamleUretici()
         self.degerlendirme = Degerlendirici()
+        self.legal_bulucu = LegalHamleBulucu()
         self.dugum_sayisi = 0
         self.max_derinlik = 0
 
@@ -30,7 +32,8 @@ class Arama:
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
 
         try:
-            hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+            # Legal hamleleri al
+            hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
 
             # Hamle yoksa None döndür
             if not hamleler:
@@ -85,15 +88,27 @@ class Arama:
         self.dugum_sayisi += 1
         self.max_derinlik = max(self.max_derinlik, self.derinlik - derinlik)
 
+        # Oyun sonu kontrolü
+        if tahta.mat_mi():
+            # Mat durumu - mevcut oyuncu için kötü
+            if maksimize_ediyor:
+                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            else:
+                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+        
+        if tahta.pat_mi():
+            # Pat durumu - beraberlik
+            return 0
+
         # Terminal düğüm kontrolü
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
-        hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+        # Legal hamleleri al
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
 
-        # Hamle yoksa (pat/mat durumu)
+        # Hamle yoksa (bu noktada mat/pat kontrolü yapıldı)
         if not hamleler:
-            # Şah durumu kontrolü yapılmalı - basit bir yaklaşım
             return self.degerlendirme.degerlendir(tahta)
 
         if maksimize_ediyor:
@@ -129,11 +144,24 @@ class Arama:
         """Basit MiniMax algoritması (Alpha-Beta olmadan)"""
         self.dugum_sayisi += 1
 
+        # Oyun sonu kontrolü
+        if tahta.mat_mi():
+            # Mat durumu - mevcut oyuncu için kötü
+            if maksimize_ediyor:
+                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+            else:
+                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
+        
+        if tahta.pat_mi():
+            # Pat durumu - beraberlik
+            return 0
+
         # Terminal düğüm kontrolü
         if derinlik == 0:
             return self.degerlendirme.degerlendir(tahta)
 
-        hamleler = self.hamle_uretici.tum_hamleleri_uret(tahta)
+        # Legal hamleleri al
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
 
         # Hamle yoksa
         if not hamleler:

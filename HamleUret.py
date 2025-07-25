@@ -60,6 +60,9 @@ class HamleUretici:
         """Mevcut pozisyon için tüm pseudo-legal hamleleri üret"""
         self.hamleler = []
         renk = 'beyaz' if tahta.beyaz_sira else 'siyah'
+        
+        # Şah kontrolü - şah çekilmişse özel durum
+        sah_tehdidinde = tahta.sah_tehdit_altinda_mi(renk)
 
         if renk == 'beyaz':
             self._piyon_hamleleri_uret(tahta, True)
@@ -76,6 +79,8 @@ class HamleUretici:
             self._vezir_hamleleri_uret(tahta, False)
             self._sah_hamleleri_uret(tahta, False)
 
+        # NOT: Legal hamle filtrelemesi LegalHamleBulucu sınıfında yapılacak
+        # Bu sınıf sadece pseudo-legal hamleleri üretir
         return self.hamleler
 
     def saldiri_altinda_mi(self, tahta, kare, beyaz_saldiri):
@@ -364,22 +369,46 @@ class HamleUretici:
     def _rok_hamleleri_uret(self, tahta, beyaz):
         """Rok hamleleri üret"""
         if beyaz:
+            # Beyaz şah e1'de mi kontrol et
+            if tahta.beyaz_sah != (1 << 4):  # e1
+                return
+                
             if tahta.beyaz_kisa_rok:
                 # Kısa rok: e1-g1
                 if not ((tahta.tum_taslar & 0x60)):  # f1 ve g1 boş
-                    self.hamleler.append((4, 6, 'sah', 'kisa_rok'))
+                    # Şah ve geçiş kareleri saldırı altında olmamalı
+                    if not self.saldiri_altinda_mi(tahta, 4, False) and \
+                       not self.saldiri_altinda_mi(tahta, 5, False) and \
+                       not self.saldiri_altinda_mi(tahta, 6, False):
+                        self.hamleler.append((4, 6, 'sah', 'kisa_rok'))
 
             if tahta.beyaz_uzun_rok:
                 # Uzun rok: e1-c1
                 if not ((tahta.tum_taslar & 0x0E)):  # b1, c1, d1 boş
-                    self.hamleler.append((4, 2, 'sah', 'uzun_rok'))
+                    # Şah ve geçiş kareleri saldırı altında olmamalı
+                    if not self.saldiri_altinda_mi(tahta, 4, False) and \
+                       not self.saldiri_altinda_mi(tahta, 3, False) and \
+                       not self.saldiri_altinda_mi(tahta, 2, False):
+                        self.hamleler.append((4, 2, 'sah', 'uzun_rok'))
         else:
+            # Siyah şah e8'de mi kontrol et
+            if tahta.siyah_sah != (1 << 60):  # e8
+                return
+                
             if tahta.siyah_kisa_rok:
                 # Kısa rok: e8-g8
                 if not ((tahta.tum_taslar & 0x6000000000000000)):  # f8 ve g8 boş
-                    self.hamleler.append((60, 62, 'sah', 'kisa_rok'))
+                    # Şah ve geçiş kareleri saldırı altında olmamalı
+                    if not self.saldiri_altinda_mi(tahta, 60, True) and \
+                       not self.saldiri_altinda_mi(tahta, 61, True) and \
+                       not self.saldiri_altinda_mi(tahta, 62, True):
+                        self.hamleler.append((60, 62, 'sah', 'kisa_rok'))
 
             if tahta.siyah_uzun_rok:
                 # Uzun rok: e8-c8
                 if not ((tahta.tum_taslar & 0x0E00000000000000)):  # b8, c8, d8 boş
-                    self.hamleler.append((60, 58, 'sah', 'uzun_rok'))
+                    # Şah ve geçiş kareleri saldırı altında olmamalı
+                    if not self.saldiri_altinda_mi(tahta, 60, True) and \
+                       not self.saldiri_altinda_mi(tahta, 59, True) and \
+                       not self.saldiri_altinda_mi(tahta, 58, True):
+                        self.hamleler.append((60, 58, 'sah', 'uzun_rok'))

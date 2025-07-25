@@ -346,3 +346,76 @@ class Tahta:
             ('siyah', 'fil'): '♝', ('siyah', 'vezir'): '♛', ('siyah', 'sah'): '♚'
         }
         return semboller.get((renk, tur), '?')
+
+    def sah_tehdit_altinda_mi(self, renk):
+        """Belirtilen rengin şahı tehdit altında mı kontrol et"""
+        from HamleUret import HamleUretici
+        hamle_uretici = HamleUretici()
+        
+        # Şahın pozisyonunu bul
+        sah_bitboard = self.beyaz_sah if renk == 'beyaz' else self.siyah_sah
+        if sah_bitboard == 0:
+            return False
+        
+        sah_pozisyonu = self.en_dusuk_bit_al(sah_bitboard)
+        
+        # Karşı tarafın saldırı kontrolü
+        return hamle_uretici.saldiri_altinda_mi(self, sah_pozisyonu, renk == 'siyah')
+
+    def legal_hamle_var_mi(self):
+        """Mevcut oyuncunun legal hamlesi var mı kontrol et"""
+        from LegalHamle import LegalHamleBulucu
+        legal_bulucu = LegalHamleBulucu()
+        legal_hamleler = legal_bulucu.legal_hamleleri_bul(self)
+        return len(legal_hamleler) > 0
+
+    def mat_mi(self):
+        """Mat durumu kontrolü"""
+        # Önce şah tehdidinde mi kontrol et (hızlı kontrol)
+        renk = 'beyaz' if self.beyaz_sira else 'siyah'
+        sah_tehdidinde = self.sah_tehdit_altinda_mi(renk)
+        
+        # Şah tehdidinde değilse mat olamaz
+        if not sah_tehdidinde:
+            return False
+        
+        # Şah tehdidindeyse legal hamle var mı kontrol et
+        return not self.legal_hamle_var_mi()
+
+    def pat_mi(self):
+        """Pat durumu kontrolü"""
+        # Önce şah tehdidinde mi kontrol et (hızlı kontrol)
+        renk = 'beyaz' if self.beyaz_sira else 'siyah'
+        sah_tehdidinde = self.sah_tehdit_altinda_mi(renk)
+        
+        # Şah tehdidindeyse pat olamaz
+        if sah_tehdidinde:
+            return False
+        
+        # Şah tehdidinde değilse legal hamle var mı kontrol et
+        return not self.legal_hamle_var_mi()
+
+    def oyun_bitti_mi(self):
+        """Oyun bitmiş mi kontrol et (mat veya pat)"""
+        # Önce legal hamle var mı kontrol et (tek kontrol)
+        if self.legal_hamle_var_mi():
+            return False
+        
+        # Legal hamle yoksa mat mı pat mı kontrol et
+        return True
+
+    def oyun_sonu_durumu(self):
+        """Oyun sonu durumunu döndür"""
+        # Önce legal hamle var mı kontrol et
+        if self.legal_hamle_var_mi():
+            return (None, None)
+        
+        # Legal hamle yoksa mat veya pat durumu
+        renk = 'beyaz' if self.beyaz_sira else 'siyah'
+        if self.sah_tehdit_altinda_mi(renk):
+            # Mat - karşı taraf kazandı
+            kazanan = 'siyah' if self.beyaz_sira else 'beyaz'
+            return ('mat', kazanan)
+        else:
+            # Pat
+            return ('pat', None)
