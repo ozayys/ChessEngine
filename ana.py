@@ -480,6 +480,7 @@ class SatrancGUI:
         controls = [
             "R - Yeniden Başlat",
             "ESC - Çıkış",
+            "1-9 - Derinlik Değiştir",
             "Beyaz: İnsan",
             "Siyah: Motor"
         ]
@@ -652,9 +653,13 @@ class SatrancGUI:
                     print("Pat! Berabere.")
                 return
 
-            # Zaman limiti ile arama yap (3 saniye)
+            # Zaman aşımı kaldırıldı - motor belirlenen derinliğe kadar arama yapacak
+            derinlik = self.arama.derinlik
+            print(f"Motor düşünüyor... (Derinlik: {derinlik}, Zaman limiti: Yok)")
+            
             baslangic_zamani = time.time()
-            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta, zaman_limiti=3.0)
+            # Zaman limiti olmadan arama yap (None geçiyoruz)
+            en_iyi_hamle = self.arama.en_iyi_hamle_bul(self.tahta, zaman_limiti=None)
             
             # Arama süresi
             gecen_sure = time.time() - baslangic_zamani
@@ -801,6 +806,10 @@ class SatrancGUI:
                         yeni_derinlik = event.key - pygame.K_0
                         self.arama.derinlik_degistir(yeni_derinlik)
                         print(f"Arama derinliği {yeni_derinlik} olarak değiştirildi.")
+                        if yeni_derinlik >= 6:
+                            print(f"UYARI: Derinlik {yeni_derinlik} çok uzun sürebilir! (5+ dakika)")
+                        elif yeni_derinlik >= 4:
+                            print(f"UYARI: Derinlik {yeni_derinlik} uzun sürebilir (1-2 dakika)")
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Sol tık

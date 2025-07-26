@@ -155,7 +155,16 @@ class Arama:
             print(f"Arama genel hatası: {e}")
         
         toplam_sure = time.time() - self.baslangic_zamani
-        print(f"=== Arama Tamamlandı - Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi} ===\n")
+        
+        if self.zaman_asimi:
+            print(f"=== Arama Zaman Aşımı ile Tamamlandı ===")
+            print(f"    Hedef derinlik: {self.derinlik}, Tamamlanan: {arama_derinligi-1 if 'arama_derinligi' in locals() else 0}")
+            print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
+        else:
+            print(f"=== Arama Tamamlandı - Hedef derinliğe ulaşıldı ({self.derinlik}) ===")
+            print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
+        
+        print()
 
         return en_iyi_hamle
 
