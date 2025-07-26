@@ -25,6 +25,22 @@ Gelişmiş değerlendirme kriterleri:
 20. Açılışın gelişimi
 """
 
+from functools import lru_cache
+import sys
+
+# Python 3.10+ için bit_count kullan, yoksa alternatif
+if sys.version_info >= (3, 10):
+    def bit_sayisi(x):
+        return x.bit_count()
+else:
+    def bit_sayisi(x):
+        # Brian Kernighan algoritması
+        count = 0
+        while x:
+            x &= x - 1
+            count += 1
+        return count
+
 
 class Degerlendirici:
     def __init__(self):
@@ -49,40 +65,35 @@ class Degerlendirici:
         # Maksimum malzeme skoru (açılış pozisyonu)
         self.max_malzeme_skoru = 78  # 16*0 + 4*1 + 4*1 + 4*2 + 2*4
         
-        # Değerlendirme cache (basit)
-        self.eval_cache = {}
-        self.cache_hit = 0
-        self.cache_miss = 0
+        # Değerlendirme cache - LRU cache kullan
+        self._eval_cache_size = 65536  # 64K entry
         
         # Merkez kareleri
         self.merkez_kareler = [27, 28, 35, 36]  # d4, e4, d5, e5
         self.genis_merkez = [18, 19, 20, 21, 26, 27, 28, 29, 34, 35, 36, 37, 42, 43, 44, 45]
+        
+        # Bitboard maskeleri - önceden hesapla
+        self._merkez_mask = 0
+        for kare in self.merkez_kareler:
+            self._merkez_mask |= 1 << kare
+        
+        self._genis_merkez_mask = 0
+        for kare in self.genis_merkez:
+            self._genis_merkez_mask |= 1 << kare
 
     def degerlendir(self, tahta):
         """Arama modülü tarafından çağrılan ana değerlendirme fonksiyonu"""
-        # Cache kontrolü
-        if hasattr(tahta, 'zobrist_hash'):
-            hash_val = tahta.zobrist_hash
-            if hash_val in self.eval_cache:
-                self.cache_hit += 1
-                cached_skor = self.eval_cache[hash_val]
-                return cached_skor if tahta.beyaz_sira else -cached_skor
-            self.cache_miss += 1
+        # Mat/pat kontrolü
+        if tahta.mat_mi():
+            return -20000 if tahta.beyaz_sira else 20000
         
-        # Arama algoritması için: mevcut sıradaki oyuncunun perspektifinden
+        if tahta.pat_mi():
+            return 0
+        
+        # Pozisyon değerlendirmesi
         skor = self.pozisyon_degerlendir(tahta)
         
-        # Cache'e kaydet
-        if hasattr(tahta, 'zobrist_hash'):
-            # Cache boyutu kontrolü
-            if len(self.eval_cache) > 100000:
-                # En eski %25'ini sil
-                silinecek = list(self.eval_cache.keys())[:len(self.eval_cache)//4]
-                for key in silinecek:
-                    del self.eval_cache[key]
-            
-            self.eval_cache[hash_val] = skor
-        
+        # Sıradaki oyuncunun perspektifinden döndür
         return skor if tahta.beyaz_sira else -skor
 
     def _pst_tablolarini_olustur(self):
@@ -184,6 +195,12 @@ class Degerlendirici:
 
     def pozisyon_degerlendir(self, tahta):
         """Ana değerlendirme fonksiyonu - 20+ kriter ile geliştirilmiş"""
+        # Mat/pat kontrolü
+        if tahta.mat_mi():
+            return 100000 if not tahta.beyaz_sira else -100000
+        if tahta.pat_mi():
+            return 0
+        
         skor = 0
 
         # Hızlı malzeme kontrolü
@@ -266,17 +283,17 @@ class Degerlendirici:
         toplam = 0
         
         if beyaz:
-            toplam += tahta.bit_sayisi(tahta.beyaz_piyon) * 100
-            toplam += tahta.bit_sayisi(tahta.beyaz_at) * 320
-            toplam += tahta.bit_sayisi(tahta.beyaz_fil) * 330
-            toplam += tahta.bit_sayisi(tahta.beyaz_kale) * 500
-            toplam += tahta.bit_sayisi(tahta.beyaz_vezir) * 900
+            toplam += bit_sayisi(tahta.beyaz_piyon) * 100
+            toplam += bit_sayisi(tahta.beyaz_at) * 320
+            toplam += bit_sayisi(tahta.beyaz_fil) * 330
+            toplam += bit_sayisi(tahta.beyaz_kale) * 500
+            toplam += bit_sayisi(tahta.beyaz_vezir) * 900
         else:
-            toplam += tahta.bit_sayisi(tahta.siyah_piyon) * 100
-            toplam += tahta.bit_sayisi(tahta.siyah_at) * 320
-            toplam += tahta.bit_sayisi(tahta.siyah_fil) * 330
-            toplam += tahta.bit_sayisi(tahta.siyah_kale) * 500
-            toplam += tahta.bit_sayisi(tahta.siyah_vezir) * 900
+            toplam += bit_sayisi(tahta.siyah_piyon) * 100
+            toplam += bit_sayisi(tahta.siyah_at) * 320
+            toplam += bit_sayisi(tahta.siyah_fil) * 330
+            toplam += bit_sayisi(tahta.siyah_kale) * 500
+            toplam += bit_sayisi(tahta.siyah_vezir) * 900
             
         return toplam
     
@@ -286,10 +303,10 @@ class Degerlendirici:
         toplam_malzeme = 0
         
         # At, fil, kale, vezir sayıları
-        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_at | tahta.siyah_at) * 1
-        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_fil | tahta.siyah_fil) * 1
-        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_kale | tahta.siyah_kale) * 2
-        toplam_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir | tahta.siyah_vezir) * 4
+        toplam_malzeme += bit_sayisi(tahta.beyaz_at | tahta.siyah_at) * 1
+        toplam_malzeme += bit_sayisi(tahta.beyaz_fil | tahta.siyah_fil) * 1
+        toplam_malzeme += bit_sayisi(tahta.beyaz_kale | tahta.siyah_kale) * 2
+        toplam_malzeme += bit_sayisi(tahta.beyaz_vezir | tahta.siyah_vezir) * 4
         
         # Faz hesaplama (0-1 arası)
         faz = 1.0 - (toplam_malzeme / self.max_malzeme_skoru)
@@ -297,61 +314,127 @@ class Degerlendirici:
 
     def malzeme_dengesi_hesapla(self, tahta):
         """Malzeme dengesini hesapla"""
-        beyaz_malzeme = 0
-        siyah_malzeme = 0
-
-        try:
-            # Bitboard'ları kullanarak hızlı hesaplama
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_piyon) * self.tas_degerleri['piyon']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_at) * self.tas_degerleri['at']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_fil) * self.tas_degerleri['fil']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_kale) * self.tas_degerleri['kale']
-            beyaz_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir) * self.tas_degerleri['vezir']
-
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_piyon) * self.tas_degerleri['piyon']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_at) * self.tas_degerleri['at']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_fil) * self.tas_degerleri['fil']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_kale) * self.tas_degerleri['kale']
-            siyah_malzeme += tahta.bit_sayisi(tahta.siyah_vezir) * self.tas_degerleri['vezir']
-        except:
-            # Bitboard metodları yoksa basit malzeme sayımı yap
-            for kare in range(64):
-                tas_info = tahta.karedeki_tas(kare)
-                if tas_info:
-                    renk, tas_turu = tas_info
-                    if tas_turu in self.tas_degerleri:
-                        if renk == 'beyaz':
-                            beyaz_malzeme += self.tas_degerleri[tas_turu]
-                        else:
-                            siyah_malzeme += self.tas_degerleri[tas_turu]
+        # Bitboard'ları kullanarak hızlı hesaplama
+        beyaz_malzeme = (
+            bit_sayisi(tahta.beyaz_piyon) * 100 +
+            bit_sayisi(tahta.beyaz_at) * 320 +
+            bit_sayisi(tahta.beyaz_fil) * 330 +
+            bit_sayisi(tahta.beyaz_kale) * 500 +
+            bit_sayisi(tahta.beyaz_vezir) * 900
+        )
+        
+        siyah_malzeme = (
+            bit_sayisi(tahta.siyah_piyon) * 100 +
+            bit_sayisi(tahta.siyah_at) * 320 +
+            bit_sayisi(tahta.siyah_fil) * 330 +
+            bit_sayisi(tahta.siyah_kale) * 500 +
+            bit_sayisi(tahta.siyah_vezir) * 900
+        )
 
         return beyaz_malzeme - siyah_malzeme
 
     def pozisyonel_deger_hesapla(self, tahta):
-        """Piece-Square Table kullanarak pozisyonel değer hesapla"""
+        """Piece-Square Table kullanarak pozisyonel değer hesapla - bitboard tabanlı"""
         skor = 0
+        oyun_fazi = self._oyun_fazi_belirle(tahta)
 
-        try:
-            oyun_fazi = self.oyun_fazi_hesapla(tahta)
-        except:
-            oyun_fazi = 0.5  # Varsayılan orta oyun
-
-        # Tüm taşlar için PST değerlerini hesapla
-        for kare in range(64):
-            try:
-                tas_bilgisi = tahta.karedeki_tas(kare)
-                if tas_bilgisi:
-                    renk, tur = tas_bilgisi
-                    pst_degeri = self.pst_deger_al(tur, kare, renk, oyun_fazi)
-
-                    if renk == 'beyaz':
-                        skor += pst_degeri
-                    else:
-                        skor -= pst_degeri
-            except:
-                continue
+        # Beyaz taşlar için PST değerleri
+        # Piyonlar
+        temp = tahta.beyaz_piyon
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor += self.piyon_pst[kare]
+        
+        # Atlar
+        temp = tahta.beyaz_at
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor += self.at_pst[kare]
+        
+        # Filler
+        temp = tahta.beyaz_fil
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor += self.fil_pst[kare]
+        
+        # Kaleler
+        temp = tahta.beyaz_kale
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor += self.kale_pst[kare]
+        
+        # Vezirler
+        temp = tahta.beyaz_vezir
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor += self.vezir_pst[kare]
+        
+        # Şah
+        if tahta.beyaz_sah:
+            kare = self._en_dusuk_bit_al(tahta.beyaz_sah)
+            if oyun_fazi > 0.5:
+                skor += self.sah_son_pst[kare]
+            else:
+                skor += self.sah_acilis_pst[kare]
+        
+        # Siyah taşlar için PST değerleri (flip edilmiş kareler)
+        # Piyonlar
+        temp = tahta.siyah_piyon
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor -= self.piyon_pst[63 - kare]
+        
+        # Atlar
+        temp = tahta.siyah_at
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor -= self.at_pst[63 - kare]
+        
+        # Filler
+        temp = tahta.siyah_fil
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor -= self.fil_pst[63 - kare]
+        
+        # Kaleler
+        temp = tahta.siyah_kale
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor -= self.kale_pst[63 - kare]
+        
+        # Vezirler
+        temp = tahta.siyah_vezir
+        while temp:
+            kare = self._en_dusuk_bit_al(temp)
+            temp = self._en_dusuk_bit_kaldir(temp)
+            skor -= self.vezir_pst[63 - kare]
+        
+        # Şah
+        if tahta.siyah_sah:
+            kare = self._en_dusuk_bit_al(tahta.siyah_sah)
+            if oyun_fazi > 0.5:
+                skor -= self.sah_son_pst[63 - kare]
+            else:
+                skor -= self.sah_acilis_pst[63 - kare]
 
         return skor
+    
+    def _en_dusuk_bit_al(self, bb):
+        """En düşük biti al (LSB)"""
+        return (bb & -bb).bit_length() - 1
+    
+    def _en_dusuk_bit_kaldir(self, bb):
+        """En düşük biti kaldır"""
+        return bb & (bb - 1)
 
     def pst_deger_al(self, tas_turu, kare, renk, oyun_fazi):
         """Belirtilen taş ve kare için PST değeri al"""
@@ -372,25 +455,22 @@ class Degerlendirici:
 
     def oyun_fazi_hesapla(self, tahta):
         """Oyun fazını hesapla (0=açılış, 1=son oyun)"""
-        try:
-            mevcut_malzeme = 0
+        mevcut_malzeme = 0
 
-            # Piyon hariç malzeme sayısını hesapla
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_at) * self.faz_malzeme_degerleri['at']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_fil) * self.faz_malzeme_degerleri['fil']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_kale) * self.faz_malzeme_degerleri['kale']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.beyaz_vezir) * self.faz_malzeme_degerleri['vezir']
+        # Piyon hariç malzeme sayısını hesapla
+        mevcut_malzeme += bit_sayisi(tahta.beyaz_at) * self.faz_malzeme_degerleri['at']
+        mevcut_malzeme += bit_sayisi(tahta.beyaz_fil) * self.faz_malzeme_degerleri['fil']
+        mevcut_malzeme += bit_sayisi(tahta.beyaz_kale) * self.faz_malzeme_degerleri['kale']
+        mevcut_malzeme += bit_sayisi(tahta.beyaz_vezir) * self.faz_malzeme_degerleri['vezir']
 
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_at) * self.faz_malzeme_degerleri['at']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_fil) * self.faz_malzeme_degerleri['fil']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_kale) * self.faz_malzeme_degerleri['kale']
-            mevcut_malzeme += tahta.bit_sayisi(tahta.siyah_vezir) * self.faz_malzeme_degerleri['vezir']
+        mevcut_malzeme += bit_sayisi(tahta.siyah_at) * self.faz_malzeme_degerleri['at']
+        mevcut_malzeme += bit_sayisi(tahta.siyah_fil) * self.faz_malzeme_degerleri['fil']
+        mevcut_malzeme += bit_sayisi(tahta.siyah_kale) * self.faz_malzeme_degerleri['kale']
+        mevcut_malzeme += bit_sayisi(tahta.siyah_vezir) * self.faz_malzeme_degerleri['vezir']
 
-            # Oyun fazı oranını hesapla
-            faz_orani = 1.0 - (mevcut_malzeme / self.max_malzeme_skoru)
-            return max(0.0, min(1.0, faz_orani))
-        except:
-            return 0.5  # Varsayılan orta oyun
+        # Oyun fazı oranını hesapla
+        faz_orani = 1.0 - (mevcut_malzeme / self.max_malzeme_skoru)
+        return max(0.0, min(1.0, faz_orani))
 
     def mobilite_hesapla(self, tahta):
         """Taş mobilitesini hesapla"""
@@ -471,7 +551,7 @@ class Degerlendirici:
             for sutun in range(8):
                 sutun_maski = 0x0101010101010101 << sutun
                 sutun_piyonlari = piyonlar & sutun_maski
-                piyon_sayisi = tahta.bit_sayisi(sutun_piyonlari)
+                piyon_sayisi = bit_sayisi(sutun_piyonlari)
 
                 if piyon_sayisi > 1:
                     ciftlenmis_sayisi += piyon_sayisi - 1
@@ -530,42 +610,38 @@ class Degerlendirici:
         return abs(skor) > 15000
     
     def merkez_kontrolu_hesapla(self, tahta):
-        """Merkez kontrolünü değerlendir"""
+        """Merkez kontrolünü değerlendir - bitboard tabanlı"""
         skor = 0
         
-        # d4, e4, d5, e5 karelerini kontrol et
-        for kare in self.merkez_kareler:
-            tas_info = tahta.karedeki_tas(kare)
-            if tas_info:
-                renk, tas_turu = tas_info
-                if renk == 'beyaz':
-                    if tas_turu == 'piyon':
-                        skor += 25  # Merkezdeki piyon
-                    else:
-                        skor += 15  # Merkezdeki diğer taşlar
-                else:
-                    if tas_turu == 'piyon':
-                        skor -= 25
-                    else:
-                        skor -= 15
+        # Merkez karelerdeki taşlar
+        beyaz_merkez = tahta.beyaz_taslar & self._merkez_mask
+        siyah_merkez = tahta.siyah_taslar & self._merkez_mask
         
-        # Geniş merkez kontrolü (daha az değerli)
-        for kare in self.genis_merkez:
-            if kare not in self.merkez_kareler:
-                tas_info = tahta.karedeki_tas(kare)
-                if tas_info:
-                    renk, tas_turu = tas_info
-                    if renk == 'beyaz':
-                        skor += 5
-                    else:
-                        skor -= 5
+        # Merkezdeki piyonlar daha değerli
+        beyaz_merkez_piyon = tahta.beyaz_piyon & self._merkez_mask
+        siyah_merkez_piyon = tahta.siyah_piyon & self._merkez_mask
+        
+        skor += bit_sayisi(beyaz_merkez_piyon) * 25
+        skor -= bit_sayisi(siyah_merkez_piyon) * 25
+        
+        # Merkezdeki diğer taşlar
+        skor += bit_sayisi(beyaz_merkez & ~beyaz_merkez_piyon) * 15
+        skor -= bit_sayisi(siyah_merkez & ~siyah_merkez_piyon) * 15
+        
+        # Geniş merkez kontrolü (merkez hariç)
+        genis_merkez_haric = self._genis_merkez_mask & ~self._merkez_mask
+        beyaz_genis = tahta.beyaz_taslar & genis_merkez_haric
+        siyah_genis = tahta.siyah_taslar & genis_merkez_haric
+        
+        skor += bit_sayisi(beyaz_genis) * 5
+        skor -= bit_sayisi(siyah_genis) * 5
         
         return skor
     
     def fil_cifti_avantaji(self, tahta):
         """Fil çifti avantajını hesapla"""
-        beyaz_fil_sayisi = tahta.bit_sayisi(tahta.beyaz_fil)
-        siyah_fil_sayisi = tahta.bit_sayisi(tahta.siyah_fil)
+        beyaz_fil_sayisi = bit_sayisi(tahta.beyaz_fil)
+        siyah_fil_sayisi = bit_sayisi(tahta.siyah_fil)
         
         skor = 0
         if beyaz_fil_sayisi >= 2:

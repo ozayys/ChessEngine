@@ -107,7 +107,10 @@ class Tahta:
     @property
     def tum_taslar(self):
         """Tüm taşların birleşik bitboard'u"""
-        return self.beyaz_taslar | self.siyah_taslar
+        return (self.beyaz_piyon | self.beyaz_kale | self.beyaz_at | 
+                self.beyaz_fil | self.beyaz_vezir | self.beyaz_sah |
+                self.siyah_piyon | self.siyah_kale | self.siyah_at | 
+                self.siyah_fil | self.siyah_vezir | self.siyah_sah)
 
     def bit_kontrol_et(self, kare):
         """Belirtilen karede taş var mı kontrol et"""
@@ -115,24 +118,21 @@ class Tahta:
 
     def tas_turu_al(self, kare):
         """Belirtilen karedeki taşın türünü ve rengini döndür"""
-        if not self.bit_kontrol_et(kare):
-            return None
-
-        mask = self.kare_maskeleri[kare]
-
-        # Beyaz taşlar
+        mask = 1 << kare
+        
+        # Beyaz taşlar - önce en sık kullanılanlar
         if self.beyaz_piyon & mask: return ('beyaz', 'piyon')
-        if self.beyaz_kale & mask: return ('beyaz', 'kale')
         if self.beyaz_at & mask: return ('beyaz', 'at')
         if self.beyaz_fil & mask: return ('beyaz', 'fil')
+        if self.beyaz_kale & mask: return ('beyaz', 'kale')
         if self.beyaz_vezir & mask: return ('beyaz', 'vezir')
         if self.beyaz_sah & mask: return ('beyaz', 'sah')
 
         # Siyah taşlar
         if self.siyah_piyon & mask: return ('siyah', 'piyon')
-        if self.siyah_kale & mask: return ('siyah', 'kale')
         if self.siyah_at & mask: return ('siyah', 'at')
         if self.siyah_fil & mask: return ('siyah', 'fil')
+        if self.siyah_kale & mask: return ('siyah', 'kale')
         if self.siyah_vezir & mask: return ('siyah', 'vezir')
         if self.siyah_sah & mask: return ('siyah', 'sah')
 
@@ -415,7 +415,10 @@ class Tahta:
         yeni_tahta.yarim_hamle_sayici = self.yarim_hamle_sayici
         yeni_tahta.hamle_sayisi = self.hamle_sayisi
         yeni_tahta.tam_hamle_sayisi = self.tam_hamle_sayisi
-        yeni_tahta.hamle_gecmisi = self.hamle_gecmisi.copy()
+        yeni_tahta.hamle_gecmisi = []  # Hamle geçmişini kopyalama (performans için)
+        
+        # Zobrist hash'i kopyala (ÖNEMLİ!)
+        yeni_tahta.zobrist_hash = self.zobrist_hash
         
         # Maskeleri kopyala (referans kopyalama yeterli)
         yeni_tahta.satir_maskeleri = self.satir_maskeleri
@@ -519,11 +522,96 @@ class Tahta:
             ('siyah', 'fil'): '♝', ('siyah', 'vezir'): '♛', ('siyah', 'sah'): '♚'
         }
         return semboller.get((renk, tur), '?')
+    
+    def fen_yukle(self, fen):
+        """FEN notasyonundan pozisyon yükle"""
+        # Tüm bitboard'ları sıfırla
+        self.beyaz_piyon = 0
+        self.beyaz_kale = 0
+        self.beyaz_at = 0
+        self.beyaz_fil = 0
+        self.beyaz_vezir = 0
+        self.beyaz_sah = 0
+        self.siyah_piyon = 0
+        self.siyah_kale = 0
+        self.siyah_at = 0
+        self.siyah_fil = 0
+        self.siyah_vezir = 0
+        self.siyah_sah = 0
+        
+        parcalar = fen.split()
+        if len(parcalar) < 4:
+            raise ValueError("Geçersiz FEN formatı")
+        
+        # Tahtayı doldur
+        satir = 7
+        sutun = 0
+        
+        for karakter in parcalar[0]:
+            if karakter == '/':
+                satir -= 1
+                sutun = 0
+            elif karakter.isdigit():
+                sutun += int(karakter)
+            else:
+                kare = satir * 8 + sutun
+                
+                # Taş türü ve rengi belirle
+                tas_turu = None
+                renk = 'beyaz' if karakter.isupper() else 'siyah'
+                
+                karakter_lower = karakter.lower()
+                if karakter_lower == 'p':
+                    tas_turu = 'piyon'
+                elif karakter_lower == 'r':
+                    tas_turu = 'kale'
+                elif karakter_lower == 'n':
+                    tas_turu = 'at'
+                elif karakter_lower == 'b':
+                    tas_turu = 'fil'
+                elif karakter_lower == 'q':
+                    tas_turu = 'vezir'
+                elif karakter_lower == 'k':
+                    tas_turu = 'sah'
+                
+                if tas_turu:
+                    self.tas_ekle(kare, renk, tas_turu)
+                
+                sutun += 1
+        
+        # Sıra
+        self.beyaz_sira = parcalar[1] == 'w'
+        
+        # Rok hakları
+        rok_haklari = parcalar[2]
+        self.beyaz_kisa_rok = 'K' in rok_haklari
+        self.beyaz_uzun_rok = 'Q' in rok_haklari
+        self.siyah_kisa_rok = 'k' in rok_haklari
+        self.siyah_uzun_rok = 'q' in rok_haklari
+        
+        # En passant
+        if parcalar[3] != '-':
+            sutun = ord(parcalar[3][0]) - ord('a')
+            satir = int(parcalar[3][1]) - 1
+            self.en_passant_kare = satir * 8 + sutun
+        else:
+            self.en_passant_kare = None
+        
+        # Yarım hamle ve tam hamle sayıcıları
+        if len(parcalar) >= 5:
+            self.yarim_hamle_sayici = int(parcalar[4])
+        if len(parcalar) >= 6:
+            self.tam_hamle_sayisi = int(parcalar[5])
+        
+        # Zobrist hash'i yeniden hesapla
+        self.zobrist_hash = self._hesapla_zobrist_hash()
 
     def sah_tehdit_altinda_mi(self, renk):
         """Belirtilen rengin şahı tehdit altında mı kontrol et"""
-        from HamleUret import HamleUretici
-        hamle_uretici = HamleUretici()
+        # Global hamle üretici kullan
+        if not hasattr(self, '_hamle_uretici'):
+            from HamleUret import HamleUretici
+            self._hamle_uretici = HamleUretici()
         
         # Şahın pozisyonunu bul
         sah_bitboard = self.beyaz_sah if renk == 'beyaz' else self.siyah_sah
@@ -533,13 +621,14 @@ class Tahta:
         sah_pozisyonu = self.en_dusuk_bit_al(sah_bitboard)
         
         # Karşı tarafın saldırı kontrolü
-        return hamle_uretici.saldiri_altinda_mi(self, sah_pozisyonu, renk == 'siyah')
+        return self._hamle_uretici.saldiri_altinda_mi(self, sah_pozisyonu, renk == 'siyah')
 
     def legal_hamle_var_mi(self):
         """Mevcut oyuncunun legal hamlesi var mı kontrol et"""
-        from LegalHamle import LegalHamleBulucu
-        legal_bulucu = LegalHamleBulucu()
-        legal_hamleler = legal_bulucu.legal_hamleleri_bul(self)
+        if not hasattr(self, '_legal_bulucu'):
+            from LegalHamle import LegalHamleBulucu
+            self._legal_bulucu = LegalHamleBulucu()
+        legal_hamleler = self._legal_bulucu.legal_hamleleri_bul(self)
         return len(legal_hamleler) > 0
 
     def mat_mi(self):

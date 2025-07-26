@@ -12,31 +12,35 @@ import time
 
 class TranspositionTable:
     """Zobrist hash tabanlı transposition table - Sabit boyutlu dizi implementasyonu"""
-    def __init__(self, boyut_mb=32):
-        # MB cinsinden boyutu entry sayısına çevir (her entry ~32 byte)
-        self.boyut = (boyut_mb * 1024 * 1024) // 32
+    def __init__(self, boyut_mb=64):  # Boyutu artırdım
+        # MB cinsinden boyutu entry sayısına çevir (her entry ~40 byte)
+        self.boyut = (boyut_mb * 1024 * 1024) // 40
         # 2'nin kuvveti yap (modulo işlemi için)
         self.boyut = 1 << (self.boyut.bit_length() - 1)
         self.tablo = [None] * self.boyut
         self.hit = 0
         self.miss = 0
         
-    def kaydet(self, hash_deger, derinlik, skor, bayrak, en_iyi_hamle=None):
+    def kaydet(self, hash_deger, derinlik, skor, bayrak, en_iyi_hamle=None, age=0):
         """Pozisyonu transposition table'a kaydet"""
-        index = hash_deger % self.boyut
+        index = hash_deger & (self.boyut - 1)  # Daha hızlı modulo
         
-        # Her zaman üzerine yaz (basit replacement scheme)
-        self.tablo[index] = {
-            'hash': hash_deger,  # Collision detection için
-            'derinlik': derinlik,
-            'skor': skor,
-            'bayrak': bayrak,  # EXACT, LOWER, UPPER
-            'en_iyi_hamle': en_iyi_hamle
-        }
+        entry = self.tablo[index]
+        
+        # Replacement scheme: derinlik öncelikli
+        if entry is None or entry['derinlik'] <= derinlik or entry['age'] < age:
+            self.tablo[index] = {
+                'hash': hash_deger,  # Collision detection için
+                'derinlik': derinlik,
+                'skor': skor,
+                'bayrak': bayrak,  # EXACT, LOWER, UPPER
+                'en_iyi_hamle': en_iyi_hamle,
+                'age': age  # Yaş bilgisi
+            }
         
     def ara(self, hash_deger):
         """Pozisyonu transposition table'da ara"""
-        index = hash_deger % self.boyut
+        index = hash_deger & (self.boyut - 1)  # Daha hızlı modulo
         entry = self.tablo[index]
         
         if entry and entry['hash'] == hash_deger:
@@ -52,12 +56,22 @@ class TranspositionTable:
         self.hit = 0
         self.miss = 0
     
+    def yeni_arama(self, age):
+        """Yeni arama için yaş güncellemesi"""
+        # Eski entryleri temizleme şansı
+        if age % 4 == 0:  # Her 4 aramada bir
+            for i in range(0, self.boyut, 8):  # Sadece bir kısmını kontrol et
+                if self.tablo[i] and self.tablo[i]['age'] < age - 8:
+                    self.tablo[i] = None
+    
     def istatistikleri_yazdir(self):
         """TT istatistiklerini yazdır"""
         toplam = self.hit + self.miss
         if toplam > 0:
             hit_orani = (self.hit / toplam) * 100
-            print(f"TT İstatistikleri - Hit: {self.hit}, Miss: {self.miss}, Hit Oranı: {hit_orani:.2f}%")
+            dolu_sayisi = sum(1 for e in self.tablo if e is not None)
+            doluluk = (dolu_sayisi / self.boyut) * 100
+            print(f"TT İstatistikleri - Hit: {self.hit}, Miss: {self.miss}, Hit Oranı: {hit_orani:.2f}%, Doluluk: {doluluk:.2f}%")
         else:
             print("TT İstatistikleri - Henüz kullanılmadı")
 
@@ -72,7 +86,7 @@ class Arama:
         self.max_derinlik = 0
         
         # Optimizasyon yapıları
-        self.transposition_table = TranspositionTable()
+        self.transposition_table = TranspositionTable(64)  # 64MB TT
         self.killer_moves = {}  # Derinlik -> [hamle1, hamle2]
         self.history_table = {}  # (from, to) -> skor
         
@@ -83,6 +97,12 @@ class Arama:
         
         # PV araması mı?
         self._pv_aramasi = False
+        
+        # Arama yaşı (TT için)
+        self._arama_yasi = 0
+        
+        # Aspiration window fail sayacı
+        self._aspiration_fail_count = 0
 
     def derinlik_degistir(self, yeni_derinlik):
         """Arama derinliğini değiştir"""
@@ -95,11 +115,16 @@ class Arama:
         self.baslangic_zamani = time.time()
         self.zaman_limiti = zaman_limiti if zaman_limiti else float('inf')
         self.zaman_asimi = False
+        self._arama_yasi += 1
+        self._aspiration_fail_count = 0
 
         en_iyi_hamle = None
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
         
         print(f"\n=== Arama Başlıyor - Derinlik: {self.derinlik} ===")
+        
+        # TT yeni arama için güncelle
+        self.transposition_table.yeni_arama(self._arama_yasi)
 
         try:
             # Legal hamleleri al
@@ -113,7 +138,8 @@ class Arama:
             hamleler = self._hamleleri_sirala(tahta, hamleler, None)
 
             # İteratif derinleştirme
-            aspiration_delta = 50  # Aspiration window başlangıç değeri
+            aspiration_delta = 50  # Başlangıç değeri
+            use_aspiration = True  # Aspiration window kullanım durumu
             
             for arama_derinligi in range(1, self.derinlik + 1):
                 if self.zaman_asimi:
@@ -121,84 +147,86 @@ class Arama:
                 
                 print(f"  Derinlik {arama_derinligi} aramaya başlanıyor...")
                 derinlik_baslangic = time.time()
+                derinlik_dugum_sayisi = self.dugum_sayisi
                     
                 temp_en_iyi_hamle = None
                 temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
                 
-                # Aspiration window kullan (derinlik 3'ten sonra)
-                if arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
+                # Aspiration window ayarla
+                if use_aspiration and arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
+                    # Derinlik arttıkça window'u genişlet
+                    aspiration_delta = 50 + (arama_derinligi - 3) * 20
                     asp_alpha = en_iyi_skor - aspiration_delta
                     asp_beta = en_iyi_skor + aspiration_delta
                 else:
                     asp_alpha = float('-inf')
                     asp_beta = float('inf')
                 
-                for i, hamle in enumerate(hamleler):
-                    if self._zaman_kontrolu():
-                        self.zaman_asimi = True
-                        break
-                        
-                    try:
-                        # Hamleyi yap
-                        tahta_kopyasi = tahta.kopyala()
-
-                        if not tahta_kopyasi.hamle_yap(hamle):
-                            continue
-
-                        if tahta.beyaz_sira:  # Beyaz oynuyor (maksimize)
-                            skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                  asp_alpha, asp_beta, False)
-                            if skor > temp_en_iyi_skor:
-                                temp_en_iyi_skor = skor
-                                temp_en_iyi_hamle = hamle
-                        else:  # Siyah oynuyor (minimize)
-                            skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                  asp_alpha, asp_beta, True)
-                            if skor < temp_en_iyi_skor:
-                                temp_en_iyi_skor = skor
-                                temp_en_iyi_hamle = hamle
-
-                    except Exception as e:
-                        print(f"Hamle değerlendirme hatası: {e}")
-                        continue
+                # İlk deneme
+                fail_count = 0
+                search_complete = False
                 
-                # Aspiration window fail kontrolü
-                aspiration_fail = False
-                if arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
-                    if temp_en_iyi_skor <= asp_alpha or temp_en_iyi_skor >= asp_beta:
-                        aspiration_fail = True
-                        print(f"  Aspiration window fail! Skor: {temp_en_iyi_skor}, Window: [{asp_alpha}, {asp_beta}]")
-                        
-                        # Full window ile yeniden ara
-                        temp_en_iyi_hamle = None
-                        temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
-                        
-                        for i, hamle in enumerate(hamleler):
-                            if self._zaman_kontrolu():
-                                self.zaman_asimi = True
-                                break
-                                
-                            try:
-                                tahta_kopyasi = tahta.kopyala()
-                                if not tahta_kopyasi.hamle_yap(hamle):
-                                    continue
+                while not search_complete and fail_count < 3:
+                    for i, hamle in enumerate(hamleler):
+                        if self._zaman_kontrolu():
+                            self.zaman_asimi = True
+                            break
+                            
+                        try:
+                            # Hamleyi yap
+                            tahta_kopyasi = tahta.kopyala()
 
-                                if tahta.beyaz_sira:
-                                    skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                          float('-inf'), float('inf'), False)
-                                    if skor > temp_en_iyi_skor:
-                                        temp_en_iyi_skor = skor
-                                        temp_en_iyi_hamle = hamle
-                                else:
-                                    skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                          float('-inf'), float('inf'), True)
-                                    if skor < temp_en_iyi_skor:
-                                        temp_en_iyi_skor = skor
-                                        temp_en_iyi_hamle = hamle
-
-                            except Exception as e:
-                                print(f"Hamle değerlendirme hatası (aspiration retry): {e}")
+                            if not tahta_kopyasi.hamle_yap(hamle):
                                 continue
+
+                            if tahta.beyaz_sira:  # Beyaz oynuyor (maksimize)
+                                skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                      asp_alpha, asp_beta, False)
+                                if skor > temp_en_iyi_skor:
+                                    temp_en_iyi_skor = skor
+                                    temp_en_iyi_hamle = hamle
+                                    if skor > asp_alpha:
+                                        asp_alpha = skor
+                            else:  # Siyah oynuyor (minimize)
+                                skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                      asp_alpha, asp_beta, True)
+                                if skor < temp_en_iyi_skor:
+                                    temp_en_iyi_skor = skor
+                                    temp_en_iyi_hamle = hamle
+                                    if skor < asp_beta:
+                                        asp_beta = skor
+
+                        except Exception as e:
+                            print(f"Hamle değerlendirme hatası: {e}")
+                            continue
+                    
+                    # Aspiration window fail kontrolü
+                    if use_aspiration and arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
+                        if temp_en_iyi_skor <= en_iyi_skor - aspiration_delta or temp_en_iyi_skor >= en_iyi_skor + aspiration_delta:
+                            fail_count += 1
+                            self._aspiration_fail_count += 1
+                            
+                            print(f"  Aspiration window fail #{fail_count}! Skor: {temp_en_iyi_skor}, Window: [{en_iyi_skor - aspiration_delta}, {en_iyi_skor + aspiration_delta}]")
+                            
+                            # Window'u genişlet
+                            aspiration_delta *= 2
+                            
+                            if fail_count >= 2 or self._aspiration_fail_count >= 5:
+                                # Çok fazla fail, aspiration window'u kapat
+                                use_aspiration = False
+                                asp_alpha = float('-inf')
+                                asp_beta = float('inf')
+                                print("  Aspiration window devre dışı bırakıldı!")
+                            else:
+                                # Yeni window ile tekrar dene
+                                asp_alpha = en_iyi_skor - aspiration_delta
+                                asp_beta = en_iyi_skor + aspiration_delta
+                                temp_en_iyi_hamle = None
+                                temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+                        else:
+                            search_complete = True
+                    else:
+                        search_complete = True
                 
                 # Bu derinlikte tamamlandıysa en iyi hamleyi güncelle
                 if not self.zaman_asimi and temp_en_iyi_hamle:
@@ -210,14 +238,9 @@ class Arama:
                         hamleler.remove(en_iyi_hamle)
                         hamleler.insert(0, en_iyi_hamle)
                     
-                    # Aspiration window'u güncelle
-                    if not aspiration_fail:
-                        aspiration_delta = max(25, aspiration_delta // 2)  # Window'u daralt
-                    else:
-                        aspiration_delta = min(200, aspiration_delta * 2)  # Window'u genişlet
-                    
                     derinlik_suresi = time.time() - derinlik_baslangic
-                    print(f"  Derinlik {arama_derinligi} tamamlandı - Süre: {derinlik_suresi:.2f}s, En iyi skor: {en_iyi_skor}")
+                    derinlik_dugum_farki = self.dugum_sayisi - derinlik_dugum_sayisi
+                    print(f"  Derinlik {arama_derinligi} tamamlandı - Süre: {derinlik_suresi:.2f}s, Düğüm: {derinlik_dugum_farki:,}, En iyi skor: {en_iyi_skor}")
 
         except Exception as e:
             print(f"Arama genel hatası: {e}")
@@ -260,15 +283,14 @@ class Arama:
                 skor += 10000
             
             # Killer moves
-            derinlik_key = self.derinlik - tahta.yarim_hamle_sayici
+            derinlik_key = self.max_derinlik
             if derinlik_key in self.killer_moves:
                 if hamle in self.killer_moves[derinlik_key]:
                     skor += 5000
             
-            # Alma hamlesi kontrolü
+            # Alma hamlesi kontrolü - MVV-LVA
             hedef_tas = tahta.tas_turu_al(hamle[1])
             if hedef_tas:
-                # MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
                 kaynak_tas = tahta.tas_turu_al(hamle[0])
                 if kaynak_tas:
                     victim_value = self._tas_degeri(hedef_tas[1])
@@ -278,12 +300,24 @@ class Arama:
             # History heuristic
             history_key = (hamle[0], hamle[1])
             if history_key in self.history_table:
-                skor += self.history_table[history_key]
+                skor += min(self.history_table[history_key], 999)  # Overflow kontrolü
             
             # Merkeze doğru hamleler
             hedef_satir, hedef_sutun = divmod(hamle[1], 8)
             merkez_uzaklik = abs(hedef_satir - 3.5) + abs(hedef_sutun - 3.5)
             skor += (7 - merkez_uzaklik) * 10
+            
+            # Terfi hamleleri
+            if len(hamle) > 4:  # Terfi hamlesi
+                terfi_tasi = hamle[4] if len(hamle) > 4 else None
+                if terfi_tasi == 'vezir':
+                    skor += 900
+                elif terfi_tasi == 'kale':
+                    skor += 500
+                elif terfi_tasi == 'fil':
+                    skor += 330
+                elif terfi_tasi == 'at':
+                    skor += 320
             
             skorlu_hamleler.append((skor, hamle))
         
@@ -390,7 +424,7 @@ class Arama:
             else:
                 hash_bayrak = 'EXACT'
 
-            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, max_eval, hash_bayrak, en_iyi_hamle)
+            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, max_eval, hash_bayrak, en_iyi_hamle, self._arama_yasi)
             
             return max_eval
             
@@ -426,7 +460,7 @@ class Arama:
             else:
                 hash_bayrak = 'EXACT'
 
-            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, min_eval, hash_bayrak, en_iyi_hamle)
+            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, min_eval, hash_bayrak, en_iyi_hamle, self._arama_yasi)
             
             return min_eval
 
