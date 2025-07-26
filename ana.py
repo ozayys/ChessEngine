@@ -637,6 +637,9 @@ class SatrancGUI:
     def motor_hamle_hesapla(self):
         """Motor hamlesi hesapla (thread fonksiyonu)"""
         try:
+            # Düğüm sayısını sıfırla
+            self.dugum_sayisi = 0
+            
             # Önce mevcut hamleleri kontrol et
             from LegalHamle import LegalHamleBulucu
             legal_bulucu = LegalHamleBulucu()
@@ -791,6 +794,7 @@ class SatrancGUI:
                     elif pygame.K_1 <= event.key <= pygame.K_9 and not self.terfi_bekliyor:
                         yeni_derinlik = event.key - pygame.K_0
                         self.arama.derinlik_degistir(yeni_derinlik)
+                        print(f"Arama derinliği {yeni_derinlik} olarak değiştirildi.")
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Sol tık
