@@ -712,6 +712,19 @@ class SatrancGUI:
         finally:
             self.motor_dusunuyor = False
     
+    def kare_notasyonu(self, indeks):
+        """Kare indeksini satranç notasyonuna çevir (örn: 0 -> a8, 63 -> h1)"""
+        satir = indeks // 8
+        sutun = indeks % 8
+        
+        # Sütunları harfe çevir (a-h)
+        sutun_harf = chr(ord('a') + sutun)
+        
+        # Satırları sayıya çevir (8-1)
+        satir_sayi = 8 - satir
+        
+        return f"{sutun_harf}{satir_sayi}"
+    
     def _hamle_notasyonu_olustur(self, hamle):
         """Hamle için satranç notasyonu oluştur"""
         kaynak, hedef = hamle[0], hamle[1]
