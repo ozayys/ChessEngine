@@ -84,6 +84,8 @@ class Arama:
 
         en_iyi_hamle = None
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+        
+        print(f"\n=== Arama Başlıyor - Derinlik: {self.derinlik} ===")
 
         try:
             # Legal hamleleri al
@@ -100,6 +102,9 @@ class Arama:
             for arama_derinligi in range(1, self.derinlik + 1):
                 if self.zaman_asimi:
                     break
+                
+                print(f"  Derinlik {arama_derinligi} aramaya başlanıyor...")
+                derinlik_baslangic = time.time()
                     
                 temp_en_iyi_hamle = None
                 temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
@@ -142,9 +147,15 @@ class Arama:
                     if en_iyi_hamle in hamleler:
                         hamleler.remove(en_iyi_hamle)
                         hamleler.insert(0, en_iyi_hamle)
+                    
+                    derinlik_suresi = time.time() - derinlik_baslangic
+                    print(f"  Derinlik {arama_derinligi} tamamlandı - Süre: {derinlik_suresi:.2f}s, En iyi skor: {en_iyi_skor}")
 
         except Exception as e:
             print(f"Arama genel hatası: {e}")
+        
+        toplam_sure = time.time() - self.baslangic_zamani
+        print(f"=== Arama Tamamlandı - Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi} ===\n")
 
         return en_iyi_hamle
 
@@ -246,9 +257,10 @@ class Arama:
         if tahta.pat_mi():
             return 0
 
-        # Quiescence search için derinlik kontrolü
+        # Derinlik 0'a ulaştığında - principal variation ile değerlendir
         if derinlik <= 0:
-            return self.quiescence_search(tahta, alpha, beta, maksimize_ediyor)
+            # Eğer şu an sıra kimdeyse, onun en iyi hamlesini hesaba kat
+            return self.principal_variation_eval(tahta, 1, alpha, beta, maksimize_ediyor)
 
         # Legal hamleleri al ve sırala
         hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
@@ -314,6 +326,44 @@ class Arama:
                 self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, min_eval, hash_bayrak, en_iyi_hamle)
             
             return min_eval
+
+    def principal_variation_eval(self, tahta, pv_derinlik, alpha, beta, maksimize_ediyor):
+        """
+        Principal Variation ile değerlendirme.
+        Mevcut pozisyonu, sıradaki oyuncunun en iyi hamlesini yapacağını varsayarak değerlendirir.
+        """
+        # Önce mevcut pozisyonun statik değerlendirmesini al
+        statik_skor = self.degerlendirme.degerlendir(tahta)
+        
+        # Eğer oyun bitmiş veya hamle yoksa statik skoru döndür
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
+        if not hamleler or tahta.mat_mi() or tahta.pat_mi():
+            return statik_skor
+        
+        # Sıradaki oyuncunun en iyi hamlesini bul (1 derinlikte)
+        en_iyi_skor = float('-inf') if maksimize_ediyor else float('inf')
+        
+        # Hamleleri sırala (daha iyi tahmini en iyi hamle için)
+        hamleler = self._hamleleri_sirala(tahta, hamleler, None)[:10]  # İlk 10 hamleye bak
+        
+        for hamle in hamleler:
+            tahta_kopyasi = tahta.kopyala()
+            tahta_kopyasi.hamle_yap(hamle)
+            
+            # Bu hamleden sonraki pozisyonun statik değerlendirmesi
+            hamle_skoru = self.degerlendirme.degerlendir(tahta_kopyasi)
+            
+            if maksimize_ediyor:
+                en_iyi_skor = max(en_iyi_skor, hamle_skoru)
+                if en_iyi_skor >= beta:
+                    break
+            else:
+                en_iyi_skor = min(en_iyi_skor, hamle_skoru)
+                if en_iyi_skor <= alpha:
+                    break
+        
+        # En iyi hamle yapıldığında oluşacak skoru döndür
+        return en_iyi_skor
 
     def quiescence_search(self, tahta, alpha, beta, maksimize_ediyor):
         """Quiescence search - sadece alma hamlelerini değerlendir"""
@@ -428,6 +478,37 @@ class Arama:
                 min_eval = min(min_eval, eval_skor)
 
             return min_eval
+
+    def pozisyon_degerlendir_pv(self, tahta):
+        """
+        GUI için pozisyon değerlendirmesi - Principal Variation mantığıyla.
+        Sıradaki oyuncunun en iyi hamlesini yapacağını varsayarak değerlendirir.
+        """
+        # Basit bir 1-ply arama yap
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
+        
+        if not hamleler or tahta.mat_mi() or tahta.pat_mi():
+            return self.degerlendirme.pozisyon_degerlendir(tahta)
+        
+        # En iyi hamleyi bul (1 derinlikte)
+        en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+        
+        # İlk 5-10 hamleye bak
+        hamleler = self._hamleleri_sirala(tahta, hamleler, None)[:10]
+        
+        for hamle in hamleler:
+            tahta_kopyasi = tahta.kopyala()
+            tahta_kopyasi.hamle_yap(hamle)
+            
+            # Bu hamleden sonraki pozisyonun değerlendirmesi
+            skor = self.degerlendirme.pozisyon_degerlendir(tahta_kopyasi)
+            
+            if tahta.beyaz_sira:
+                en_iyi_skor = max(en_iyi_skor, skor)
+            else:
+                en_iyi_skor = min(en_iyi_skor, skor)
+        
+        return en_iyi_skor
 
     def get_istatistikler(self):
         """Arama istatistiklerini döndür"""
