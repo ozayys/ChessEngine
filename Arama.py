@@ -65,22 +65,18 @@ class Arama:
         self.killer_moves = {}  # Derinlik -> [hamle1, hamle2]
         self.history_table = {}  # (from, to) -> skor
         
-        # Zaman yönetimi
+        # Zaman yönetimi - KALDIRILDI
         self.baslangic_zamani = 0
-        self.zaman_limiti = 0
-        self.zaman_asimi = False
 
     def derinlik_degistir(self, yeni_derinlik):
         """Arama derinliğini değiştir"""
         self.derinlik = yeni_derinlik
 
     def en_iyi_hamle_bul(self, tahta, zaman_limiti=None):
-        """Alpha-Beta pruning ile en iyi hamleyi bul"""
+        """Alpha-Beta pruning ile en iyi hamleyi bul - ZAMAN SINIRI KALDIRILDI"""
         self.dugum_sayisi = 0
         self.max_derinlik = 0
         self.baslangic_zamani = time.time()
-        self.zaman_limiti = zaman_limiti if zaman_limiti else float('inf')
-        self.zaman_asimi = False
 
         en_iyi_hamle = None
         en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
@@ -100,9 +96,6 @@ class Arama:
 
             # İteratif derinleştirme
             for arama_derinligi in range(1, self.derinlik + 1):
-                if self.zaman_asimi:
-                    break
-                
                 print(f"  Derinlik {arama_derinligi} aramaya başlanıyor...")
                 derinlik_baslangic = time.time()
                     
@@ -110,10 +103,6 @@ class Arama:
                 temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
                 
                 for i, hamle in enumerate(hamleler):
-                    if self._zaman_kontrolu():
-                        self.zaman_asimi = True
-                        break
-                        
                     try:
                         # Hamleyi yap
                         tahta_kopyasi = tahta.kopyala()
@@ -139,7 +128,7 @@ class Arama:
                         continue
                 
                 # Bu derinlikte tamamlandıysa en iyi hamleyi güncelle
-                if not self.zaman_asimi and temp_en_iyi_hamle:
+                if temp_en_iyi_hamle:
                     en_iyi_hamle = temp_en_iyi_hamle
                     en_iyi_skor = temp_en_iyi_skor
                     
@@ -156,23 +145,11 @@ class Arama:
         
         toplam_sure = time.time() - self.baslangic_zamani
         
-        if self.zaman_asimi:
-            print(f"=== Arama Zaman Aşımı ile Tamamlandı ===")
-            print(f"    Hedef derinlik: {self.derinlik}, Tamamlanan: {arama_derinligi-1 if 'arama_derinligi' in locals() else 0}")
-            print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
-        else:
-            print(f"=== Arama Tamamlandı - Hedef derinliğe ulaşıldı ({self.derinlik}) ===")
-            print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
-        
+        print(f"=== Arama Tamamlandı - Hedef derinliğe ulaşıldı ({self.derinlik}) ===")
+        print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
         print()
 
         return en_iyi_hamle
-
-    def _zaman_kontrolu(self):
-        """Zaman aşımı kontrolü"""
-        if self.zaman_limiti == float('inf'):
-            return False
-        return time.time() - self.baslangic_zamani > self.zaman_limiti
 
     def _hamleleri_sirala(self, tahta, hamleler, tt_hamle):
         """Hamleleri sırala - daha iyi sıralama için gelişmiş algoritma"""
@@ -234,11 +211,6 @@ class Arama:
         """Alpha-Beta pruning algoritması - optimizasyonlarla"""
         self.dugum_sayisi += 1
         self.max_derinlik = max(self.max_derinlik, self.derinlik - derinlik)
-        
-        # Zaman kontrolü
-        if self._zaman_kontrolu():
-            self.zaman_asimi = True
-            return self.degerlendirme.degerlendir(tahta)
 
         # Transposition table kontrolü
         tt_entry = self.transposition_table.ara(tahta.zobrist_hash()) if hasattr(tahta, 'zobrist_hash') else None
