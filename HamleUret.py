@@ -262,7 +262,7 @@ class HamleUretici:
                     self.hamleler.append((kaynak, hedef, 'piyon', 'alma'))
 
             # En passant
-            if tahta.en_passant_kare != -1:
+            if tahta.en_passant_kare is not None and tahta.en_passant_kare != -1:
                 if saldiri_maskeleri[kaynak] & (1 << tahta.en_passant_kare):
                     self.hamleler.append((kaynak, tahta.en_passant_kare, 'piyon', 'en_passant'))
 

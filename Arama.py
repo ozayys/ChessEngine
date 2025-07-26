@@ -69,6 +69,9 @@ class Arama:
         self.baslangic_zamani = 0
         self.zaman_limiti = 0
         self.zaman_asimi = False
+        
+        # PV araması mı?
+        self._pv_aramasi = False
 
     def derinlik_degistir(self, yeni_derinlik):
         """Arama derinliğini değiştir"""
@@ -99,6 +102,8 @@ class Arama:
             hamleler = self._hamleleri_sirala(tahta, hamleler, None)
 
             # İteratif derinleştirme
+            aspiration_delta = 50  # Aspiration window başlangıç değeri
+            
             for arama_derinligi in range(1, self.derinlik + 1):
                 if self.zaman_asimi:
                     break
@@ -108,6 +113,14 @@ class Arama:
                     
                 temp_en_iyi_hamle = None
                 temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+                
+                # Aspiration window kullan (derinlik 3'ten sonra)
+                if arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
+                    asp_alpha = en_iyi_skor - aspiration_delta
+                    asp_beta = en_iyi_skor + aspiration_delta
+                else:
+                    asp_alpha = float('-inf')
+                    asp_beta = float('inf')
                 
                 for i, hamle in enumerate(hamleler):
                     if self._zaman_kontrolu():
@@ -123,13 +136,13 @@ class Arama:
 
                         if tahta.beyaz_sira:  # Beyaz oynuyor (maksimize)
                             skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                  float('-inf'), float('inf'), False)
+                                                  asp_alpha, asp_beta, False)
                             if skor > temp_en_iyi_skor:
                                 temp_en_iyi_skor = skor
                                 temp_en_iyi_hamle = hamle
                         else:  # Siyah oynuyor (minimize)
                             skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
-                                                  float('-inf'), float('inf'), True)
+                                                  asp_alpha, asp_beta, True)
                             if skor < temp_en_iyi_skor:
                                 temp_en_iyi_skor = skor
                                 temp_en_iyi_hamle = hamle
@@ -137,6 +150,44 @@ class Arama:
                     except Exception as e:
                         print(f"Hamle değerlendirme hatası: {e}")
                         continue
+                
+                # Aspiration window fail kontrolü
+                aspiration_fail = False
+                if arama_derinligi >= 3 and en_iyi_skor != float('-inf') and en_iyi_skor != float('inf'):
+                    if temp_en_iyi_skor <= asp_alpha or temp_en_iyi_skor >= asp_beta:
+                        aspiration_fail = True
+                        print(f"  Aspiration window fail! Skor: {temp_en_iyi_skor}, Window: [{asp_alpha}, {asp_beta}]")
+                        
+                        # Full window ile yeniden ara
+                        temp_en_iyi_hamle = None
+                        temp_en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+                        
+                        for i, hamle in enumerate(hamleler):
+                            if self._zaman_kontrolu():
+                                self.zaman_asimi = True
+                                break
+                                
+                            try:
+                                tahta_kopyasi = tahta.kopyala()
+                                if not tahta_kopyasi.hamle_yap(hamle):
+                                    continue
+
+                                if tahta.beyaz_sira:
+                                    skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                          float('-inf'), float('inf'), False)
+                                    if skor > temp_en_iyi_skor:
+                                        temp_en_iyi_skor = skor
+                                        temp_en_iyi_hamle = hamle
+                                else:
+                                    skor = self.alpha_beta(tahta_kopyasi, arama_derinligi - 1, 
+                                                          float('-inf'), float('inf'), True)
+                                    if skor < temp_en_iyi_skor:
+                                        temp_en_iyi_skor = skor
+                                        temp_en_iyi_hamle = hamle
+
+                            except Exception as e:
+                                print(f"Hamle değerlendirme hatası (aspiration retry): {e}")
+                                continue
                 
                 # Bu derinlikte tamamlandıysa en iyi hamleyi güncelle
                 if not self.zaman_asimi and temp_en_iyi_hamle:
@@ -147,6 +198,12 @@ class Arama:
                     if en_iyi_hamle in hamleler:
                         hamleler.remove(en_iyi_hamle)
                         hamleler.insert(0, en_iyi_hamle)
+                    
+                    # Aspiration window'u güncelle
+                    if not aspiration_fail:
+                        aspiration_delta = max(25, aspiration_delta // 2)  # Window'u daralt
+                    else:
+                        aspiration_delta = min(200, aspiration_delta * 2)  # Window'u genişlet
                     
                     derinlik_suresi = time.time() - derinlik_baslangic
                     print(f"  Derinlik {arama_derinligi} tamamlandı - Süre: {derinlik_suresi:.2f}s, En iyi skor: {en_iyi_skor}")
@@ -244,18 +301,20 @@ class Arama:
         tt_entry = self.transposition_table.ara(tahta.zobrist_hash()) if hasattr(tahta, 'zobrist_hash') else None
         tt_hamle = None
         
-        if tt_entry and tt_entry['derinlik'] >= derinlik:
-            if tt_entry['bayrak'] == 'EXACT':
-                return tt_entry['skor']
-            elif tt_entry['bayrak'] == 'LOWER':
-                alpha = max(alpha, tt_entry['skor'])
-            elif tt_entry['bayrak'] == 'UPPER':
-                beta = min(beta, tt_entry['skor'])
-            
-            if alpha >= beta:
-                return tt_entry['skor']
-        
         if tt_entry:
+            # PV aramasında veya düşük derinliklerde TT kullanma
+            if not self._pv_aramasi and tt_entry['derinlik'] >= derinlik:
+                if tt_entry['bayrak'] == 'EXACT':
+                    return tt_entry['skor']
+                elif tt_entry['bayrak'] == 'LOWER':
+                    alpha = max(alpha, tt_entry['skor'])
+                elif tt_entry['bayrak'] == 'UPPER':
+                    beta = min(beta, tt_entry['skor'])
+                
+                if alpha >= beta:
+                    return tt_entry['skor']
+            
+            # Her zaman en iyi hamleyi kullan
             tt_hamle = tt_entry.get('en_iyi_hamle')
 
         # Oyun sonu kontrolü
@@ -266,10 +325,10 @@ class Arama:
         if tahta.pat_mi():
             return 0
 
-        # Derinlik 0'a ulaştığında - principal variation ile değerlendir
+        # Derinlik 0'a ulaştığında - quiescence search ile değerlendir
         if derinlik <= 0:
-            # Eğer şu an sıra kimdeyse, onun en iyi hamlesini hesaba kat
-            return self.principal_variation_eval(tahta, 1, alpha, beta, maksimize_ediyor)
+            # Quiescence search ile durgun pozisyona ulaş
+            return self.quiescence_search(tahta, alpha, beta, maksimize_ediyor)
 
         # Legal hamleleri al ve sırala
         hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
@@ -281,6 +340,7 @@ class Arama:
 
         en_iyi_hamle = None
         hash_bayrak = 'UPPER'
+        alpha_orig = alpha
 
         if maksimize_ediyor:
             max_eval = float('-inf')
@@ -295,14 +355,23 @@ class Arama:
                     max_eval = eval_skor
                     en_iyi_hamle = hamle
                     
-                alpha = max(alpha, eval_skor)
+                if eval_skor > alpha:
+                    alpha = eval_skor
 
-                if beta <= alpha:
+                if alpha >= beta:
                     # Beta cutoff - killer move olarak kaydet
                     self._killer_move_ekle(derinlik, hamle)
                     self._history_guncelle(hamle, derinlik)
                     hash_bayrak = 'LOWER'
                     break
+            
+            # Hash bayrak belirleme
+            if max_eval <= alpha_orig:
+                hash_bayrak = 'UPPER'
+            elif max_eval >= beta:
+                hash_bayrak = 'LOWER'
+            else:
+                hash_bayrak = 'EXACT'
 
             if hasattr(tahta, 'zobrist_hash'):
                 self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, max_eval, hash_bayrak, en_iyi_hamle)
@@ -311,6 +380,7 @@ class Arama:
             
         else:
             min_eval = float('inf')
+            beta_orig = beta
             
             for hamle in hamleler:
                 tahta_kopyasi = tahta.kopyala()
@@ -322,14 +392,23 @@ class Arama:
                     min_eval = eval_skor
                     en_iyi_hamle = hamle
                     
-                beta = min(beta, eval_skor)
+                if eval_skor < beta:
+                    beta = eval_skor
 
                 if beta <= alpha:
                     # Alpha cutoff - killer move olarak kaydet
                     self._killer_move_ekle(derinlik, hamle)
                     self._history_guncelle(hamle, derinlik)
-                    hash_bayrak = 'LOWER'
+                    hash_bayrak = 'UPPER'
                     break
+            
+            # Hash bayrak belirleme
+            if min_eval >= beta_orig:
+                hash_bayrak = 'LOWER'
+            elif min_eval <= alpha:
+                hash_bayrak = 'UPPER'
+            else:
+                hash_bayrak = 'EXACT'
 
             if hasattr(tahta, 'zobrist_hash'):
                 self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, min_eval, hash_bayrak, en_iyi_hamle)
@@ -374,8 +453,14 @@ class Arama:
         # En iyi hamle yapıldığında oluşacak skoru döndür
         return en_iyi_skor
 
-    def quiescence_search(self, tahta, alpha, beta, maksimize_ediyor):
+    def quiescence_search(self, tahta, alpha, beta, maksimize_ediyor, qs_derinlik=0):
         """Quiescence search - sadece alma hamlelerini değerlendir"""
+        self.dugum_sayisi += 1
+        
+        # QS derinlik limiti (max 4 ply)
+        if qs_derinlik > 4:
+            return self.degerlendirme.degerlendir(tahta)
+        
         stand_pat = self.degerlendirme.degerlendir(tahta)
         
         if maksimize_ediyor:
@@ -399,7 +484,7 @@ class Arama:
             tahta_kopyasi = tahta.kopyala()
             tahta_kopyasi.hamle_yap(hamle)
             
-            skor = self.quiescence_search(tahta_kopyasi, alpha, beta, not maksimize_ediyor)
+            skor = self.quiescence_search(tahta_kopyasi, alpha, beta, not maksimize_ediyor, qs_derinlik + 1)
             
             if maksimize_ediyor:
                 alpha = max(alpha, skor)
@@ -491,33 +576,35 @@ class Arama:
     def pozisyon_degerlendir_pv(self, tahta):
         """
         GUI için pozisyon değerlendirmesi - Principal Variation mantığıyla.
-        Sıradaki oyuncunun en iyi hamlesini yapacağını varsayarak değerlendirir.
+        Daha tutarlı sonuçlar için kısa bir alpha-beta araması yapar.
         """
-        # Basit bir 1-ply arama yap
-        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
+        # Oyun sonu kontrolü
+        if tahta.mat_mi():
+            return -20000 if tahta.beyaz_sira else 20000
         
-        if not hamleler or tahta.mat_mi() or tahta.pat_mi():
+        if tahta.pat_mi():
+            return 0
+            
+        # Legal hamle kontrolü
+        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
+        if not hamleler:
             return self.degerlendirme.pozisyon_degerlendir(tahta)
         
-        # En iyi hamleyi bul (1 derinlikte)
-        en_iyi_skor = float('-inf') if tahta.beyaz_sira else float('inf')
+        # Kısa bir 2-3 ply alpha-beta araması yap
+        arama_derinligi = min(3, self.derinlik)
         
-        # İlk 5-10 hamleye bak
-        hamleler = self._hamleleri_sirala(tahta, hamleler, None)[:10]
+        # PV araması bayrağını aç
+        eski_pv_durumu = self._pv_aramasi
+        self._pv_aramasi = True
         
-        for hamle in hamleler:
-            tahta_kopyasi = tahta.kopyala()
-            tahta_kopyasi.hamle_yap(hamle)
-            
-            # Bu hamleden sonraki pozisyonun değerlendirmesi
-            skor = self.degerlendirme.pozisyon_degerlendir(tahta_kopyasi)
-            
-            if tahta.beyaz_sira:
-                en_iyi_skor = max(en_iyi_skor, skor)
-            else:
-                en_iyi_skor = min(en_iyi_skor, skor)
+        try:
+            # Alpha-beta araması
+            skor = self.alpha_beta(tahta, arama_derinligi, float('-inf'), float('inf'), tahta.beyaz_sira)
+        finally:
+            # Bayrağı eski haline döndür
+            self._pv_aramasi = eski_pv_durumu
         
-        return en_iyi_skor
+        return skor
 
     def get_istatistikler(self):
         """Arama istatistiklerini döndür"""

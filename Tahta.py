@@ -67,9 +67,11 @@ class Tahta:
         self.beyaz_uzun_rok = True
         self.siyah_kisa_rok = True
         self.siyah_uzun_rok = True
-        self.en_passant_kare = -1
+        self.en_passant_kare = None
         self.yarim_hamle_sayici = 0
         self.hamle_sayisi = 1
+        self.tam_hamle_sayisi = 1
+        self.hamle_gecmisi = []
 
         # Precalculated masks ve tablolar
         self._maskeleri_hazirla()
@@ -214,6 +216,18 @@ class Tahta:
                 print(f"DEBUG: Geçersiz kare: kaynak={kaynak}, hedef={hedef}")
                 return False
 
+            # Önceki durumu kaydet (geri alma için)
+            onceki_durum = {
+                'kaynak_tas': self.tas_turu_al(kaynak),
+                'hedef_tas': self.tas_turu_al(hedef),
+                'en_passant_kare': self.en_passant_kare,
+                'beyaz_kisa_rok': self.beyaz_kisa_rok,
+                'beyaz_uzun_rok': self.beyaz_uzun_rok,
+                'siyah_kisa_rok': self.siyah_kisa_rok,
+                'siyah_uzun_rok': self.siyah_uzun_rok,
+                'yarim_hamle_sayici': self.yarim_hamle_sayici
+            }
+            
             # Kaynak karedeki taşı al
             tas_bilgisi = self.tas_turu_al(kaynak)
             if not tas_bilgisi:
@@ -279,17 +293,26 @@ class Tahta:
 
             # En passant karesi sıfırla (iki kare piyon hamlesi dışında)
             if ozel_hamle != 'iki_kare':
-                self.en_passant_kare = -1
+                self.en_passant_kare = None
+
+            # Yarım hamle sayacını güncelle
+            if tur == 'piyon' or ozel_hamle == 'alma':
+                self.yarim_hamle_sayici = 0
+            else:
+                self.yarim_hamle_sayici += 1
+
+            # Tam hamle sayısını güncelle
+            if not self.beyaz_sira:
+                self.tam_hamle_sayisi += 1
 
             # Sırayı değiştir
             self.beyaz_sira = not self.beyaz_sira
 
-            # Hamle sayısını artır
-            if not self.beyaz_sira:  # Siyah oynadıysa
-                self.hamle_sayisi += 1
-
-            # Sıra değişimini Zobrist'e yansıt
-            self._hash ^= self._zobrist_side
+            # Hamle geçmişine ekle
+            self.hamle_gecmisi.append((hamle, onceki_durum))
+            
+            # Zobrist hash'i güncelle
+            self._hash = self._hesapla_zobrist_hash()
 
             return True
 
@@ -359,6 +382,8 @@ class Tahta:
         yeni_tahta.en_passant_kare = self.en_passant_kare
         yeni_tahta.yarim_hamle_sayici = self.yarim_hamle_sayici
         yeni_tahta.hamle_sayisi = self.hamle_sayisi
+        yeni_tahta.tam_hamle_sayisi = self.tam_hamle_sayisi
+        yeni_tahta.hamle_gecmisi = self.hamle_gecmisi.copy()
         
         # Maskeleri kopyala (referans kopyalama yeterli)
         yeni_tahta.satir_maskeleri = self.satir_maskeleri
@@ -398,7 +423,7 @@ class Tahta:
             h ^= self._zobrist_castling['siyah_uzun']
         
         # En passant
-        if self.en_passant_kare != -1:
+        if self.en_passant_kare is not None and self.en_passant_kare != -1:
             sutun = self.en_passant_kare % 8
             h ^= self._zobrist_en_passant[sutun]
         
