@@ -3,15 +3,81 @@ Pseudo-legal hamle üretici. Her taş türü için optimize edilmiş hamle üret
 Bitboard tabanlı hız optimizasyonları ile.
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
+# Bit işlemleri için yardımcı fonksiyonlar
+def bit_sayisi(x):
+    """Bit sayısını hesapla"""
+    count = 0
+    while x:
+        x &= x - 1
+        count += 1
+    return count
+
+@dataclass
+class Hamle:
+    """Hamle veri yapısı"""
+    kaynak: int
+    hedef: int
+    tas: str
+    tur: str = 'normal'  # normal, alma, terfi, terfi_alma, kisa_rok, uzun_rok, en_passant, iki_kare
+    terfi_tasi: Optional[str] = None
+    skor: int = 0  # Move ordering için
+
+    def __eq__(self, other):
+        if isinstance(other, tuple):
+            # Tuple ile karşılaştırma (geriye uyumluluk)
+            if len(other) >= 2:
+                return self.kaynak == other[0] and self.hedef == other[1]
+            return False
+        return (self.kaynak == other.kaynak and 
+                self.hedef == other.hedef and 
+                self.terfi_tasi == other.terfi_tasi)
+    
+    def __hash__(self):
+        return hash((self.kaynak, self.hedef, self.terfi_tasi))
+    
+    def to_tuple(self):
+        """Geriye uyumluluk için tuple'a çevir"""
+        if self.terfi_tasi:
+            return (self.kaynak, self.hedef, self.tas, self.tur, self.terfi_tasi)
+        return (self.kaynak, self.hedef, self.tas, self.tur)
+
+
 class HamleUretici:
+    # Sınıf değişkenleri - bir kez hesaplanır
+    _maskeler_hazir = False
+    at_hamle_maskeleri = None
+    sah_hamle_maskeleri = None
+    beyaz_piyon_saldiri = None
+    siyah_piyon_saldiri = None
+    merkez_kareler = None
+    genis_merkez = None
+    
+    # Taş değerleri (MVV-LVA için)
+    tas_degerleri = {
+        'piyon': 100,
+        'at': 320,
+        'fil': 330,
+        'kale': 500,
+        'vezir': 900,
+        'sah': 20000
+    }
+    
     def __init__(self):
         self.hamleler = []
-        self._onceden_hesapla()
+        if not HamleUretici._maskeler_hazir:
+            HamleUretici._onceden_hesapla_sinif()
 
-    def _onceden_hesapla(self):
-        """Sık kullanılan maskeleri ve tabloları önceden hesapla"""
+    @classmethod
+    def _onceden_hesapla_sinif(cls):
+        """Sık kullanılan maskeleri ve tabloları önceden hesapla - sınıf seviyesinde"""
+        if cls._maskeler_hazir:
+            return
+            
         # At hamleleri için ön hesaplama
-        self.at_hamle_maskeleri = [0] * 64
+        cls.at_hamle_maskeleri = [0] * 64
         for kare in range(64):
             satir, sutun = divmod(kare, 8)
             mask = 0
@@ -19,10 +85,10 @@ class HamleUretici:
                 yeni_satir, yeni_sutun = satir + ds, sutun + dt
                 if 0 <= yeni_satir < 8 and 0 <= yeni_sutun < 8:
                     mask |= 1 << (yeni_satir * 8 + yeni_sutun)
-            self.at_hamle_maskeleri[kare] = mask
+            cls.at_hamle_maskeleri[kare] = mask
 
         # Şah hamleleri için ön hesaplama
-        self.sah_hamle_maskeleri = [0] * 64
+        cls.sah_hamle_maskeleri = [0] * 64
         for kare in range(64):
             satir, sutun = divmod(kare, 8)
             mask = 0
@@ -33,11 +99,11 @@ class HamleUretici:
                     yeni_satir, yeni_sutun = satir + ds, sutun + dt
                     if 0 <= yeni_satir < 8 and 0 <= yeni_sutun < 8:
                         mask |= 1 << (yeni_satir * 8 + yeni_sutun)
-            self.sah_hamle_maskeleri[kare] = mask
+            cls.sah_hamle_maskeleri[kare] = mask
 
         # Piyon saldırı maskeleri
-        self.beyaz_piyon_saldiri = [0] * 64
-        self.siyah_piyon_saldiri = [0] * 64
+        cls.beyaz_piyon_saldiri = [0] * 64
+        cls.siyah_piyon_saldiri = [0] * 64
 
         for kare in range(64):
             satir, sutun = divmod(kare, 8)
@@ -47,14 +113,56 @@ class HamleUretici:
             if satir < 7:
                 if sutun > 0: mask |= 1 << ((satir + 1) * 8 + sutun - 1)
                 if sutun < 7: mask |= 1 << ((satir + 1) * 8 + sutun + 1)
-            self.beyaz_piyon_saldiri[kare] = mask
+            cls.beyaz_piyon_saldiri[kare] = mask
 
             # Siyah piyon saldırıları
             mask = 0
             if satir > 0:
                 if sutun > 0: mask |= 1 << ((satir - 1) * 8 + sutun - 1)
                 if sutun < 7: mask |= 1 << ((satir - 1) * 8 + sutun + 1)
-            self.siyah_piyon_saldiri[kare] = mask
+            cls.siyah_piyon_saldiri[kare] = mask
+        
+        # Merkez kareleri (move ordering için)
+        cls.merkez_kareler = set([27, 28, 35, 36])  # d4, e4, d5, e5
+        cls.genis_merkez = set([18, 19, 20, 21, 26, 27, 28, 29, 34, 35, 36, 37, 42, 43, 44, 45])
+        
+        # İşaret et
+        cls._maskeler_hazir = True
+
+    def _hamle_skoru_hesapla(self, hamle, tahta):
+        """Hamle için skor hesapla (move ordering için)"""
+        skor = 0
+        
+        # Terfi hamleleri en yüksek öncelik
+        if hamle.tur in ['terfi', 'terfi_alma']:
+            if hamle.terfi_tasi == 'vezir':
+                skor += 9000
+            elif hamle.terfi_tasi == 'kale':
+                skor += 5000
+            elif hamle.terfi_tasi == 'fil':
+                skor += 3300
+            else:  # at
+                skor += 3200
+        
+        # Alma hamleleri - MVV-LVA
+        if hamle.tur in ['alma', 'terfi_alma', 'en_passant']:
+            hedef_tas = tahta.tas_turu_al(hamle.hedef)
+            if hedef_tas:
+                victim_value = self.tas_degerleri.get(hedef_tas[1], 0)
+                attacker_value = self.tas_degerleri.get(hamle.tas, 0)
+                skor += 1000 + (victim_value * 10) - attacker_value
+        
+        # Merkeze doğru hamleler
+        if hamle.hedef in self.merkez_kareler:
+            skor += 50
+        elif hamle.hedef in self.genis_merkez:
+            skor += 25
+        
+        # Tehdit edilen taşları uzaklaştırma
+        if self.saldiri_altinda_mi(tahta, hamle.kaynak, tahta.beyaz_sira):
+            skor += 20
+        
+        return skor
 
     def tum_hamleleri_uret(self, tahta):
         """Mevcut pozisyon için tüm pseudo-legal hamleleri üret"""
@@ -78,10 +186,14 @@ class HamleUretici:
             self._kale_hamleleri_uret(tahta, False)
             self._vezir_hamleleri_uret(tahta, False)
             self._sah_hamleleri_uret(tahta, False)
-
-        # NOT: Legal hamle filtrelemesi LegalHamleBulucu sınıfında yapılacak
-        # Bu sınıf sadece pseudo-legal hamleleri üretir
-        return self.hamleler
+        
+        # Hamleleri skorla ve tuple'a çevir (geriye uyumluluk için)
+        hamleler_tuple = []
+        for hamle in self.hamleler:
+            hamle.skor = self._hamle_skoru_hesapla(hamle, tahta)
+            hamleler_tuple.append(hamle.to_tuple())
+        
+        return hamleler_tuple
 
     def saldiri_altinda_mi(self, tahta, kare, beyaz_saldiri):
         """Belirtilen kare saldırı altında mı kontrol et"""
@@ -236,15 +348,15 @@ class HamleUretici:
                 if satir + (1 if beyaz else -1) == terfi_satiri:
                     # Terfi hamleleri
                     for terfi_tasi in ['vezir', 'kale', 'fil', 'at']:
-                        self.hamleler.append((kaynak, hedef, 'piyon', 'terfi', terfi_tasi))
+                        self.hamleler.append(Hamle(kaynak, hedef, 'piyon', 'terfi', terfi_tasi))
                 else:
-                    self.hamleler.append((kaynak, hedef, 'piyon', 'normal'))
+                    self.hamleler.append(Hamle(kaynak, hedef, 'piyon', 'normal'))
 
                 # İki kare ileri (başlangıç pozisyonundan)
                 if satir == baslangic_satiri:
                     hedef2 = kaynak + 2 * yon
                     if 0 <= hedef2 < 64 and not (tum_taslar & (1 << hedef2)):
-                        self.hamleler.append((kaynak, hedef2, 'piyon', 'iki_kare'))
+                        self.hamleler.append(Hamle(kaynak, hedef2, 'piyon', 'iki_kare'))
 
             # Çapraz saldırılar
             saldiri_maskeleri = self.beyaz_piyon_saldiri if beyaz else self.siyah_piyon_saldiri
@@ -257,14 +369,14 @@ class HamleUretici:
                 if satir + (1 if beyaz else -1) == terfi_satiri:
                     # Terfi ile alma
                     for terfi_tasi in ['vezir', 'kale', 'fil', 'at']:
-                        self.hamleler.append((kaynak, hedef, 'piyon', 'terfi_alma', terfi_tasi))
+                        self.hamleler.append(Hamle(kaynak, hedef, 'piyon', 'terfi_alma', terfi_tasi))
                 else:
-                    self.hamleler.append((kaynak, hedef, 'piyon', 'alma'))
+                    self.hamleler.append(Hamle(kaynak, hedef, 'piyon', 'alma'))
 
             # En passant
             if tahta.en_passant_kare is not None and tahta.en_passant_kare != -1:
                 if saldiri_maskeleri[kaynak] & (1 << tahta.en_passant_kare):
-                    self.hamleler.append((kaynak, tahta.en_passant_kare, 'piyon', 'en_passant'))
+                    self.hamleler.append(Hamle(kaynak, tahta.en_passant_kare, 'piyon', 'en_passant'))
 
     def _at_hamleleri_uret(self, tahta, beyaz):
         """At hamleleri üret"""
@@ -282,7 +394,7 @@ class HamleUretici:
                 hedefler = tahta.en_dusuk_bit_kaldir(hedefler)
 
                 hamle_turu = 'alma' if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef) else 'normal'
-                self.hamleler.append((kaynak, hedef, 'at', hamle_turu))
+                self.hamleler.append(Hamle(kaynak, hedef, 'at', hamle_turu))
 
     def _fil_hamleleri_uret(self, tahta, beyaz):
         """Fil hamleleri üret"""
@@ -306,7 +418,7 @@ class HamleUretici:
                         break
 
                     hamle_turu = 'alma' if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef) else 'normal'
-                    self.hamleler.append((kaynak, hedef, 'fil', hamle_turu))
+                    self.hamleler.append(Hamle(kaynak, hedef, 'fil', hamle_turu))
 
                     if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef):  # Düşman taşına çarptı
                         break
@@ -335,7 +447,7 @@ class HamleUretici:
                         break
 
                     hamle_turu = 'alma' if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef) else 'normal'
-                    self.hamleler.append((kaynak, hedef, 'kale', hamle_turu))
+                    self.hamleler.append(Hamle(kaynak, hedef, 'kale', hamle_turu))
 
                     if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef):  # Düşman taşına çarptı
                         break
@@ -367,7 +479,7 @@ class HamleUretici:
                         break
 
                     hamle_turu = 'alma' if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef) else 'normal'
-                    self.hamleler.append((kaynak, hedef, 'vezir', hamle_turu))
+                    self.hamleler.append(Hamle(kaynak, hedef, 'vezir', hamle_turu))
 
                     if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef):  # Düşman taşına çarptı
                         break
@@ -390,7 +502,7 @@ class HamleUretici:
             hedefler = tahta.en_dusuk_bit_kaldir(hedefler)
 
             hamle_turu = 'alma' if (tahta.beyaz_taslar | tahta.siyah_taslar) & (1 << hedef) else 'normal'
-            self.hamleler.append((kaynak, hedef, 'sah', hamle_turu))
+            self.hamleler.append(Hamle(kaynak, hedef, 'sah', hamle_turu))
 
         # Rok hamleleri
         self._rok_hamleleri_uret(tahta, beyaz)
@@ -409,7 +521,7 @@ class HamleUretici:
                     if not self.saldiri_altinda_mi(tahta, 4, False) and \
                        not self.saldiri_altinda_mi(tahta, 5, False) and \
                        not self.saldiri_altinda_mi(tahta, 6, False):
-                        self.hamleler.append((4, 6, 'sah', 'kisa_rok'))
+                        self.hamleler.append(Hamle(4, 6, 'sah', 'kisa_rok'))
 
             if tahta.beyaz_uzun_rok:
                 # Uzun rok: e1-c1
@@ -418,7 +530,7 @@ class HamleUretici:
                     if not self.saldiri_altinda_mi(tahta, 4, False) and \
                        not self.saldiri_altinda_mi(tahta, 3, False) and \
                        not self.saldiri_altinda_mi(tahta, 2, False):
-                        self.hamleler.append((4, 2, 'sah', 'uzun_rok'))
+                        self.hamleler.append(Hamle(4, 2, 'sah', 'uzun_rok'))
         else:
             # Siyah şah e8'de mi kontrol et
             if tahta.siyah_sah != (1 << 60):  # e8
@@ -431,7 +543,7 @@ class HamleUretici:
                     if not self.saldiri_altinda_mi(tahta, 60, True) and \
                        not self.saldiri_altinda_mi(tahta, 61, True) and \
                        not self.saldiri_altinda_mi(tahta, 62, True):
-                        self.hamleler.append((60, 62, 'sah', 'kisa_rok'))
+                        self.hamleler.append(Hamle(60, 62, 'sah', 'kisa_rok'))
 
             if tahta.siyah_uzun_rok:
                 # Uzun rok: e8-c8
@@ -440,4 +552,238 @@ class HamleUretici:
                     if not self.saldiri_altinda_mi(tahta, 60, True) and \
                        not self.saldiri_altinda_mi(tahta, 59, True) and \
                        not self.saldiri_altinda_mi(tahta, 58, True):
-                        self.hamleler.append((60, 58, 'sah', 'uzun_rok'))
+                        self.hamleler.append(Hamle(60, 58, 'sah', 'uzun_rok'))
+
+    def piyon_yapisi_analizi(self, tahta, beyaz):
+        """Piyon yapısı analizi - detaylı bilgi döndürür"""
+        analiz = {
+            'gecer_piyonlar': [],
+            'izole_piyonlar': [],
+            'cift_piyonlar': [],
+            'geri_kalmis_piyonlar': [],
+            'piyon_zincirleri': [],
+            'piyon_adalari': 0
+        }
+        
+        piyonlar = tahta.beyaz_piyon if beyaz else tahta.siyah_piyon
+        dusman_piyonlar = tahta.siyah_piyon if beyaz else tahta.beyaz_piyon
+        
+        # Her piyon için analiz
+        temp_piyonlar = piyonlar
+        while temp_piyonlar:
+            kare = self._en_dusuk_bit_al(temp_piyonlar)
+            temp_piyonlar = self._en_dusuk_bit_kaldir(temp_piyonlar)
+            
+            satir, sutun = divmod(kare, 8)
+            
+            # Geçer piyon kontrolü
+            if self._gecer_piyon_mu(kare, beyaz, dusman_piyonlar):
+                analiz['gecer_piyonlar'].append(kare)
+            
+            # İzole piyon kontrolü
+            if self._izole_piyon_mu(kare, sutun, piyonlar):
+                analiz['izole_piyonlar'].append(kare)
+            
+            # Geri kalmış piyon kontrolü
+            if self._geri_kalmis_piyon_mu(kare, satir, sutun, beyaz, piyonlar):
+                analiz['geri_kalmis_piyonlar'].append(kare)
+        
+        # Çift piyon kontrolü
+        analiz['cift_piyonlar'] = self._cift_piyonlari_bul(piyonlar)
+        
+        # Piyon adaları sayısı
+        analiz['piyon_adalari'] = self._piyon_adalari_say(piyonlar)
+        
+        return analiz
+    
+    def _gecer_piyon_mu(self, kare, beyaz, dusman_piyonlar):
+        """Verilen piyon geçer piyon mu kontrol et"""
+        satir, sutun = divmod(kare, 8)
+        
+        # Beyaz için ilerisi, siyah için gerisi kontrol edilmeli
+        if beyaz:
+            # Önündeki karelerde düşman piyonu var mı?
+            for kontrol_satir in range(satir + 1, 8):
+                # Aynı sütun
+                if dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun)):
+                    return False
+                # Sol komşu sütun
+                if sutun > 0 and dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun - 1)):
+                    return False
+                # Sağ komşu sütun
+                if sutun < 7 and dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun + 1)):
+                    return False
+        else:
+            # Siyah için
+            for kontrol_satir in range(0, satir):
+                # Aynı sütun
+                if dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun)):
+                    return False
+                # Sol komşu sütun
+                if sutun > 0 and dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun - 1)):
+                    return False
+                # Sağ komşu sütun
+                if sutun < 7 and dusman_piyonlar & (1 << (kontrol_satir * 8 + sutun + 1)):
+                    return False
+        
+        return True
+    
+    def _izole_piyon_mu(self, kare, sutun, piyonlar):
+        """Verilen piyon izole mi kontrol et"""
+        # Sol ve sağ sütunlardaki piyon var mı?
+        sol_sutun_mask = 0x0101010101010101 << (sutun - 1) if sutun > 0 else 0
+        sag_sutun_mask = 0x0101010101010101 << (sutun + 1) if sutun < 7 else 0
+        
+        komsu_mask = sol_sutun_mask | sag_sutun_mask
+        return (piyonlar & komsu_mask) == 0
+    
+    def _geri_kalmis_piyon_mu(self, kare, satir, sutun, beyaz, piyonlar):
+        """Verilen piyon geri kalmış mı kontrol et"""
+        # Komşu sütunlardaki piyonlar bu piyondan ilerde mi?
+        sol_sutun = sutun - 1 if sutun > 0 else -1
+        sag_sutun = sutun + 1 if sutun < 7 else -1
+        
+        geri_kalmis = True
+        
+        if beyaz:
+            # Beyaz için komşu piyonlar daha ileride mi?
+            if sol_sutun >= 0:
+                sol_mask = 0x0101010101010101 << sol_sutun
+                sol_piyonlar = piyonlar & sol_mask
+                while sol_piyonlar:
+                    piyon_kare = self._en_dusuk_bit_al(sol_piyonlar)
+                    sol_piyonlar = self._en_dusuk_bit_kaldir(sol_piyonlar)
+                    if piyon_kare // 8 <= satir:
+                        geri_kalmis = False
+                        break
+            
+            if geri_kalmis and sag_sutun <= 7:
+                sag_mask = 0x0101010101010101 << sag_sutun
+                sag_piyonlar = piyonlar & sag_mask
+                while sag_piyonlar:
+                    piyon_kare = self._en_dusuk_bit_al(sag_piyonlar)
+                    sag_piyonlar = self._en_dusuk_bit_kaldir(sag_piyonlar)
+                    if piyon_kare // 8 <= satir:
+                        geri_kalmis = False
+                        break
+        else:
+            # Siyah için komşu piyonlar daha geride mi?
+            if sol_sutun >= 0:
+                sol_mask = 0x0101010101010101 << sol_sutun
+                sol_piyonlar = piyonlar & sol_mask
+                while sol_piyonlar:
+                    piyon_kare = self._en_dusuk_bit_al(sol_piyonlar)
+                    sol_piyonlar = self._en_dusuk_bit_kaldir(sol_piyonlar)
+                    if piyon_kare // 8 >= satir:
+                        geri_kalmis = False
+                        break
+            
+            if geri_kalmis and sag_sutun <= 7:
+                sag_mask = 0x0101010101010101 << sag_sutun
+                sag_piyonlar = piyonlar & sag_mask
+                while sag_piyonlar:
+                    piyon_kare = self._en_dusuk_bit_al(sag_piyonlar)
+                    sag_piyonlar = self._en_dusuk_bit_kaldir(sag_piyonlar)
+                    if piyon_kare // 8 >= satir:
+                        geri_kalmis = False
+                        break
+        
+        return geri_kalmis
+    
+    def _cift_piyonlari_bul(self, piyonlar):
+        """Çift piyonları bul ve listele"""
+        cift_piyonlar = []
+        
+        for sutun in range(8):
+            sutun_mask = 0x0101010101010101 << sutun
+            sutun_piyonlari = piyonlar & sutun_mask
+            
+            piyon_sayisi = bit_sayisi(sutun_piyonlari)
+            if piyon_sayisi > 1:
+                # Bu sütundaki tüm piyonları çift piyon olarak işaretle
+                temp = sutun_piyonlari
+                while temp:
+                    kare = self._en_dusuk_bit_al(temp)
+                    temp = self._en_dusuk_bit_kaldir(temp)
+                    cift_piyonlar.append(kare)
+        
+        return cift_piyonlar
+    
+    def _piyon_adalari_say(self, piyonlar):
+        """Piyon adalarının sayısını hesapla"""
+        adalalar = 0
+        onceki_sutunda_piyon_var = False
+        
+        for sutun in range(8):
+            sutun_mask = 0x0101010101010101 << sutun
+            sutunda_piyon_var = bool(piyonlar & sutun_mask)
+            
+            if sutunda_piyon_var and not onceki_sutunda_piyon_var:
+                adalalar += 1
+            
+            onceki_sutunda_piyon_var = sutunda_piyon_var
+        
+        return adalalar
+    
+    def _rok_mumkun_mu(self, tahta, beyaz, kisa_rok):
+        """Rok hamlesinin mümkün olup olmadığını kontrol et"""
+        if beyaz:
+            sah_kare = 4  # e1
+            if tahta.beyaz_sah != (1 << sah_kare):
+                return False
+            
+            if kisa_rok:
+                if not tahta.beyaz_kisa_rok:
+                    return False
+                # f1 ve g1 boş mu?
+                if tahta.tum_taslar & 0x60:
+                    return False
+                # e1, f1, g1 saldırı altında mı?
+                return (not self.saldiri_altinda_mi(tahta, 4, False) and
+                        not self.saldiri_altinda_mi(tahta, 5, False) and
+                        not self.saldiri_altinda_mi(tahta, 6, False))
+            else:
+                if not tahta.beyaz_uzun_rok:
+                    return False
+                # b1, c1, d1 boş mu?
+                if tahta.tum_taslar & 0x0E:
+                    return False
+                # e1, d1, c1 saldırı altında mı?
+                return (not self.saldiri_altinda_mi(tahta, 4, False) and
+                        not self.saldiri_altinda_mi(tahta, 3, False) and
+                        not self.saldiri_altinda_mi(tahta, 2, False))
+        else:
+            sah_kare = 60  # e8
+            if tahta.siyah_sah != (1 << sah_kare):
+                return False
+            
+            if kisa_rok:
+                if not tahta.siyah_kisa_rok:
+                    return False
+                # f8 ve g8 boş mu?
+                if tahta.tum_taslar & 0x6000000000000000:
+                    return False
+                # e8, f8, g8 saldırı altında mı?
+                return (not self.saldiri_altinda_mi(tahta, 60, True) and
+                        not self.saldiri_altinda_mi(tahta, 61, True) and
+                        not self.saldiri_altinda_mi(tahta, 62, True))
+            else:
+                if not tahta.siyah_uzun_rok:
+                    return False
+                # b8, c8, d8 boş mu?
+                if tahta.tum_taslar & 0x0E00000000000000:
+                    return False
+                # e8, d8, c8 saldırı altında mı?
+                return (not self.saldiri_altinda_mi(tahta, 60, True) and
+                        not self.saldiri_altinda_mi(tahta, 59, True) and
+                        not self.saldiri_altinda_mi(tahta, 58, True))
+    
+    def _en_dusuk_bit_al(self, bb):
+        """En düşük biti al (LSB)"""
+        if bb == 0:
+            return -1
+        return (bb & -bb).bit_length() - 1
+    
+    def _en_dusuk_bit_kaldir(self, bb):
+        """En düşük biti kaldır"""
+        return bb & (bb - 1)
