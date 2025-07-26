@@ -575,11 +575,9 @@ class SatrancGUI:
                     if self.tahta.hamle_yap(hamle):
                         self.son_hamle = hamle
                         
-                        # Pozisyonu değerlendir (beyaz perspektifinden)
-                        from Degerlendirme import Degerlendirici
-                        degerlendirici = Degerlendirici()
-                        # Değerlendirmeyi beyaz perspektifinden al (pozitif = beyaz iyi, negatif = siyah iyi)
-                        raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                        # Pozisyonu değerlendir - Principal Variation ile
+                        # Sıradaki oyuncunun en iyi hamlesini yapacağını varsayarak
+                        raw_skor = self.arama.pozisyon_degerlendir_pv(self.tahta)
                         self.son_degerlendirme = raw_skor / 100.0
                         
                         return True
@@ -604,10 +602,8 @@ class SatrancGUI:
             if self.tahta.hamle_yap(hamle):
                 self.son_hamle = hamle
                 
-                # Pozisyonu değerlendir
-                from Degerlendirme import Degerlendirici
-                degerlendirici = Degerlendirici()
-                raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                # Pozisyonu değerlendir - Principal Variation ile
+                raw_skor = self.arama.pozisyon_degerlendir_pv(self.tahta)
                 self.son_degerlendirme = raw_skor / 100.0
                 
                 # Terfi durumunu sıfırla
@@ -683,11 +679,8 @@ class SatrancGUI:
                     
                     self.son_hamle = en_iyi_hamle
                     
-                    # Pozisyonu değerlendir (beyaz perspektifinden)
-                    from Degerlendirme import Degerlendirici
-                    degerlendirici = Degerlendirici()
-                    # Değerlendirmeyi beyaz perspektifinden al (pozitif = beyaz iyi, negatif = siyah iyi)
-                    raw_skor = degerlendirici.pozisyon_degerlendir(self.tahta)
+                    # Pozisyonu değerlendir - Principal Variation ile
+                    raw_skor = self.arama.pozisyon_degerlendir_pv(self.tahta)
                     self.son_degerlendirme = raw_skor / 100.0  # Centipawn'dan pawn'a çevir
                     
                     # Oyun bitti mi kontrol et
