@@ -62,7 +62,7 @@ class Degerlendirici:
         """Arama modülü tarafından çağrılan ana değerlendirme fonksiyonu"""
         # Cache kontrolü
         if hasattr(tahta, 'zobrist_hash'):
-            hash_val = tahta.zobrist_hash()
+            hash_val = tahta.zobrist_hash
             if hash_val in self.eval_cache:
                 self.cache_hit += 1
                 cached_skor = self.eval_cache[hash_val]

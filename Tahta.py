@@ -76,8 +76,8 @@ class Tahta:
         # Precalculated masks ve tablolar
         self._maskeleri_hazirla()
         
-        # Zobrist hash değeri
-        self._hash = self._hesapla_zobrist_hash()
+        # Zobrist hash değeri - başlangıçta hesapla
+        self.zobrist_hash = self._hesapla_zobrist_hash()
 
     def _maskeleri_hazirla(self):
         """Sık kullanılan bit maskelerini önceden hesapla"""
@@ -204,7 +204,6 @@ class Tahta:
         """Hamleyi tahtaya uygula - tuple formatında"""
         try:
             if not hamle or len(hamle) < 2:
-                print(f"DEBUG: Geçersiz hamle formatı: {hamle}")
                 return False
 
             kaynak = hamle[0]
@@ -213,7 +212,6 @@ class Tahta:
 
             # Kare sınırları kontrolü
             if not (0 <= kaynak <= 63) or not (0 <= hedef <= 63):
-                print(f"DEBUG: Geçersiz kare: kaynak={kaynak}, hedef={hedef}")
                 return False
 
             # Önceki durumu kaydet (geri alma için)
@@ -225,27 +223,50 @@ class Tahta:
                 'beyaz_uzun_rok': self.beyaz_uzun_rok,
                 'siyah_kisa_rok': self.siyah_kisa_rok,
                 'siyah_uzun_rok': self.siyah_uzun_rok,
-                'yarim_hamle_sayici': self.yarim_hamle_sayici
+                'yarim_hamle_sayici': self.yarim_hamle_sayici,
+                'eski_hash': self.zobrist_hash  # Hash'i yedekle
             }
             
             # Kaynak karedeki taşı al
             tas_bilgisi = self.tas_turu_al(kaynak)
             if not tas_bilgisi:
-                print(f"DEBUG: Kaynak karede taş yok: {kaynak}")
                 return False
 
             renk, tur = tas_bilgisi
 
             # Doğru renk kontrolü
             if (renk == 'beyaz') != self.beyaz_sira:
-                print(f"DEBUG: Yanlış renk: {renk}, sıra: {'beyaz' if self.beyaz_sira else 'siyah'}")
                 return False
 
+            # --- ZOBRIST HASH GÜNCELLEMELERİ BAŞLANGICI ---
+            
+            # Sıra değişimi hash'i
+            self.zobrist_hash ^= self._zobrist_side
+            
+            # Eski en passant hash'ini kaldır
+            if self.en_passant_kare is not None and self.en_passant_kare != -1:
+                eski_sutun = self.en_passant_kare % 8
+                self.zobrist_hash ^= self._zobrist_en_passant[eski_sutun]
+            
+            # Eski rok haklarını hash'den çıkar
+            if self.beyaz_kisa_rok:
+                self.zobrist_hash ^= self._zobrist_castling['beyaz_kisa']
+            if self.beyaz_uzun_rok:
+                self.zobrist_hash ^= self._zobrist_castling['beyaz_uzun']
+            if self.siyah_kisa_rok:
+                self.zobrist_hash ^= self._zobrist_castling['siyah_kisa']
+            if self.siyah_uzun_rok:
+                self.zobrist_hash ^= self._zobrist_castling['siyah_uzun']
+            
+            # --- HAMLE İŞLEMLERİ ---
+
             # Hedef karedeki taşı kaldır (eğer varsa)
-            self.tas_kaldir(hedef)
+            hedef_tas = self.tas_turu_al(hedef)
+            if hedef_tas:
+                self.tas_kaldir(hedef)  # Bu, _zobrist_guncelle_tas_kaldir'ı çağıracak
 
             # Kaynak karedeki taşı kaldır
-            self.tas_kaldir(kaynak)
+            self.tas_kaldir(kaynak)  # Bu, _zobrist_guncelle_tas_kaldir'ı çağıracak
 
             # Özel hamle durumları
             if ozel_hamle == 'kisa_rok':
@@ -294,9 +315,26 @@ class Tahta:
             # En passant karesi sıfırla (iki kare piyon hamlesi dışında)
             if ozel_hamle != 'iki_kare':
                 self.en_passant_kare = None
+            
+            # --- YENİ DURUM HASH GÜNCELLEMELERİ ---
+            
+            # Yeni rok haklarını hash'e ekle
+            if self.beyaz_kisa_rok:
+                self.zobrist_hash ^= self._zobrist_castling['beyaz_kisa']
+            if self.beyaz_uzun_rok:
+                self.zobrist_hash ^= self._zobrist_castling['beyaz_uzun']
+            if self.siyah_kisa_rok:
+                self.zobrist_hash ^= self._zobrist_castling['siyah_kisa']
+            if self.siyah_uzun_rok:
+                self.zobrist_hash ^= self._zobrist_castling['siyah_uzun']
+            
+            # Yeni en passant hash'ini ekle
+            if self.en_passant_kare is not None and self.en_passant_kare != -1:
+                yeni_sutun = self.en_passant_kare % 8
+                self.zobrist_hash ^= self._zobrist_en_passant[yeni_sutun]
 
             # Yarım hamle sayacını güncelle
-            if tur == 'piyon' or ozel_hamle == 'alma':
+            if tur == 'piyon' or hedef_tas:
                 self.yarim_hamle_sayici = 0
             else:
                 self.yarim_hamle_sayici += 1
@@ -310,16 +348,10 @@ class Tahta:
 
             # Hamle geçmişine ekle
             self.hamle_gecmisi.append((hamle, onceki_durum))
-            
-            # Zobrist hash'i güncelle
-            self._hash = self._hesapla_zobrist_hash()
 
             return True
 
         except Exception as e:
-            print(f"DEBUG: Hamle yapma hatası: {e}, hamle: {hamle}")
-            import traceback
-            traceback.print_exc()
             return False
 
     def _rok_haklarini_guncelle(self, kaynak, hedef, renk, tur):
@@ -393,24 +425,20 @@ class Tahta:
         yeni_tahta.kare_maskeleri = self.kare_maskeleri
         
         # Zobrist hash
-        yeni_tahta._hash = self._hash
+        yeni_tahta.zobrist_hash = self.zobrist_hash
         
         return yeni_tahta
 
-    def zobrist_hash(self):
-        """Mevcut pozisyonun Zobrist hash değerini döndür"""
-        return self._hash
-    
     def _hesapla_zobrist_hash(self):
         """Zobrist hash değerini sıfırdan hesapla"""
         h = 0
         
-        # Taşlar
+        # Tüm taşlar için
         for kare in range(64):
-            tas_bilgisi = self.tas_turu_al(kare)
-            if tas_bilgisi:
-                renk, tas = tas_bilgisi
-                h ^= self._zobrist_pieces[(kare, renk, tas)]
+            tas = self.tas_turu_al(kare)
+            if tas:
+                renk, tur = tas
+                h ^= self._zobrist_pieces[(kare, renk, tur)]
         
         # Rok hakları
         if self.beyaz_kisa_rok:
@@ -433,13 +461,21 @@ class Tahta:
         
         return h
     
+    def hash_dogrula(self):
+        """Hash doğruluğunu kontrol et (debug amaçlı)"""
+        hesaplanan_hash = self._hesapla_zobrist_hash()
+        if hesaplanan_hash != self.zobrist_hash:
+            print(f"HASH UYUŞMAZLIĞI! Beklenen: {self.zobrist_hash:016X}, Hesaplanan: {hesaplanan_hash:016X}")
+            return False
+        return True
+    
     def _zobrist_guncelle_tas_ekle(self, kare, renk, tas):
         """Taş eklendiğinde Zobrist hash'i güncelle"""
-        self._hash ^= self._zobrist_pieces[(kare, renk, tas)]
+        self.zobrist_hash ^= self._zobrist_pieces[(kare, renk, tas)]
     
     def _zobrist_guncelle_tas_kaldir(self, kare, renk, tas):
         """Taş kaldırıldığında Zobrist hash'i güncelle"""
-        self._hash ^= self._zobrist_pieces[(kare, renk, tas)]
+        self.zobrist_hash ^= self._zobrist_pieces[(kare, renk, tas)]
 
     def bit_sayisi(self, bitboard):
         """Bitboard'daki set bit sayısını döndür (popcount)"""
