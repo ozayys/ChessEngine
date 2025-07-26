@@ -7,29 +7,27 @@ Transposition table, killer moves ve hamle sıralama optimizasyonları.
 from HamleUret import HamleUretici
 from Degerlendirme import Degerlendirici
 from LegalHamle import LegalHamleBulucu
-import copy
 import time
 
 
 class TranspositionTable:
-    """Zobrist hash tabanlı transposition table"""
+    """Zobrist hash tabanlı transposition table - Sabit boyutlu dizi implementasyonu"""
     def __init__(self, boyut_mb=32):
-        # MB cinsinden boyutu entry sayısına çevir (her entry ~24 byte)
-        self.boyut = (boyut_mb * 1024 * 1024) // 24
-        self.tablo = {}
+        # MB cinsinden boyutu entry sayısına çevir (her entry ~32 byte)
+        self.boyut = (boyut_mb * 1024 * 1024) // 32
+        # 2'nin kuvveti yap (modulo işlemi için)
+        self.boyut = 1 << (self.boyut.bit_length() - 1)
+        self.tablo = [None] * self.boyut
         self.hit = 0
         self.miss = 0
         
     def kaydet(self, hash_deger, derinlik, skor, bayrak, en_iyi_hamle=None):
         """Pozisyonu transposition table'a kaydet"""
-        # Boyut kontrolü - eski girişleri temizle
-        if len(self.tablo) > self.boyut:
-            # En eski %25'ini sil
-            silinecek = list(self.tablo.keys())[:len(self.tablo)//4]
-            for key in silinecek:
-                del self.tablo[key]
-                
-        self.tablo[hash_deger] = {
+        index = hash_deger % self.boyut
+        
+        # Her zaman üzerine yaz (basit replacement scheme)
+        self.tablo[index] = {
+            'hash': hash_deger,  # Collision detection için
             'derinlik': derinlik,
             'skor': skor,
             'bayrak': bayrak,  # EXACT, LOWER, UPPER
@@ -38,17 +36,30 @@ class TranspositionTable:
         
     def ara(self, hash_deger):
         """Pozisyonu transposition table'da ara"""
-        if hash_deger in self.tablo:
+        index = hash_deger % self.boyut
+        entry = self.tablo[index]
+        
+        if entry and entry['hash'] == hash_deger:
             self.hit += 1
-            return self.tablo[hash_deger]
+            return entry
+        
         self.miss += 1
         return None
         
     def temizle(self):
         """Transposition table'ı temizle"""
-        self.tablo.clear()
+        self.tablo = [None] * self.boyut
         self.hit = 0
         self.miss = 0
+    
+    def istatistikleri_yazdir(self):
+        """TT istatistiklerini yazdır"""
+        toplam = self.hit + self.miss
+        if toplam > 0:
+            hit_orani = (self.hit / toplam) * 100
+            print(f"TT İstatistikleri - Hit: {self.hit}, Miss: {self.miss}, Hit Oranı: {hit_orani:.2f}%")
+        else:
+            print("TT İstatistikleri - Henüz kullanılmadı")
 
 
 class Arama:
@@ -221,6 +232,12 @@ class Arama:
             print(f"=== Arama Tamamlandı - Hedef derinliğe ulaşıldı ({self.derinlik}) ===")
             print(f"    Toplam süre: {toplam_sure:.2f}s, Düğüm sayısı: {self.dugum_sayisi}")
         
+        # İstatistikleri yazdır
+        if self.dugum_sayisi > 0:
+            dugum_per_saniye = int(self.dugum_sayisi / toplam_sure) if toplam_sure > 0 else 0
+            print(f"    Düğüm/saniye: {dugum_per_saniye:,}")
+        
+        self.transposition_table.istatistikleri_yazdir()
         print()
 
         return en_iyi_hamle
@@ -298,7 +315,7 @@ class Arama:
             return self.degerlendirme.degerlendir(tahta)
 
         # Transposition table kontrolü
-        tt_entry = self.transposition_table.ara(tahta.zobrist_hash()) if hasattr(tahta, 'zobrist_hash') else None
+        tt_entry = self.transposition_table.ara(tahta.zobrist_hash)
         tt_hamle = None
         
         if tt_entry:
@@ -373,8 +390,7 @@ class Arama:
             else:
                 hash_bayrak = 'EXACT'
 
-            if hasattr(tahta, 'zobrist_hash'):
-                self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, max_eval, hash_bayrak, en_iyi_hamle)
+            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, max_eval, hash_bayrak, en_iyi_hamle)
             
             return max_eval
             
@@ -410,8 +426,7 @@ class Arama:
             else:
                 hash_bayrak = 'EXACT'
 
-            if hasattr(tahta, 'zobrist_hash'):
-                self.transposition_table.kaydet(tahta.zobrist_hash(), derinlik, min_eval, hash_bayrak, en_iyi_hamle)
+            self.transposition_table.kaydet(tahta.zobrist_hash, derinlik, min_eval, hash_bayrak, en_iyi_hamle)
             
             return min_eval
 
@@ -525,53 +540,7 @@ class Arama:
             for k in self.history_table:
                 self.history_table[k] //= 2
 
-    def minimax(self, tahta, derinlik, maksimize_ediyor):
-        """Basit MiniMax algoritması (Alpha-Beta olmadan)"""
-        self.dugum_sayisi += 1
 
-        # Oyun sonu kontrolü
-        if tahta.mat_mi():
-            # Mat durumu - mevcut oyuncu için kötü
-            if maksimize_ediyor:
-                return -self.degerlendirme.mat_skoru(self.derinlik - derinlik)
-            else:
-                return self.degerlendirme.mat_skoru(self.derinlik - derinlik)
-        
-        if tahta.pat_mi():
-            # Pat durumu - beraberlik
-            return 0
-
-        # Terminal düğüm kontrolü
-        if derinlik == 0:
-            return self.degerlendirme.degerlendir(tahta)
-
-        # Legal hamleleri al
-        hamleler = self.legal_bulucu.legal_hamleleri_bul(tahta)
-
-        # Hamle yoksa
-        if not hamleler:
-            return self.degerlendirme.degerlendir(tahta)
-
-        if maksimize_ediyor:
-            max_eval = float('-inf')
-            for hamle in hamleler:
-                tahta_kopyasi = copy.deepcopy(tahta)
-                tahta_kopyasi.hamle_yap(hamle)
-
-                eval_skor = self.minimax(tahta_kopyasi, derinlik - 1, False)
-                max_eval = max(max_eval, eval_skor)
-
-            return max_eval
-        else:
-            min_eval = float('inf')
-            for hamle in hamleler:
-                tahta_kopyasi = copy.deepcopy(tahta)
-                tahta_kopyasi.hamle_yap(hamle)
-
-                eval_skor = self.minimax(tahta_kopyasi, derinlik - 1, True)
-                min_eval = min(min_eval, eval_skor)
-
-            return min_eval
 
     def pozisyon_degerlendir_pv(self, tahta):
         """
